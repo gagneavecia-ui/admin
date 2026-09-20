@@ -1,0 +1,462 @@
+// ================================================================
+// API ADMIN — ARVEXA School
+// Toutes les actions admin passent par ici
+// Vérification stricte du rôle admin côté serveur
+// ================================================================
+
+const WINDOW_MS = 60 * 1000;
+const MAX_REQUESTS_PER_WINDOW = 60; // Large pour l'admin
+const requestLog = new Map();
+
+let adminServices;
+
+function getAdminServices() {
+  if (adminServices) return adminServices;
+  const credentials = process.env.FIREBASE_ADMIN_CREDENTIALS;
+  if (!credentials) throw new Error('firebase_admin_not_configured');
+  const admin = require('firebase-admin');
+  const serviceAccount = JSON.parse(credentials);
+  if (!admin.apps.length) {
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+  }
+  adminServices = {
+    auth: admin.auth(),
+    db: admin.firestore(),
+    FieldValue: admin.firestore.FieldValue
+  };
+  return adminServices;
+}
+
+function clientIp(request) {
+  return String(request.headers['x-forwarded-for'] || request.socket?.remoteAddress || 'unknown')
+    .split(',')[0].trim();
+}
+
+function rateLimited(ip) {
+  const now = Date.now();
+  const recent = (requestLog.get(ip) || []).filter((time) => now - time < WINDOW_MS);
+  recent.push(now);
+  requestLog.set(ip, recent);
+  return recent.length > MAX_REQUESTS_PER_WINDOW;
+}
+
+function jsonError(response, status, error) {
+  return response.status(status).json({ success: false, error });
+}
+
+async function verifyFirebaseToken(request) {
+  const authorization = request.headers.authorization || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+  try {
+    return await getAdminServices().auth.verifyIdToken(match[1]);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function requireAdmin(request) {
+  const user = await verifyFirebaseToken(request);
+  if (!user) throw { status: 401, message: 'Connexion requise.' };
+  const { db } = getAdminServices();
+  const userDoc = await db.collection('users').doc(user.uid).get();
+  const data = userDoc.data();
+  if (!data || data.role !== 'admin') {
+    throw { status: 403, message: 'Accès refusé. Réservé aux administrateurs.' };
+  }
+  return { uid: user.uid, email: user.email, data };
+}
+
+function isPremiumActive(u) {
+  if (!u) return false;
+  const active = u.premium === true || u.isUnlocked === true || u.hasDeposited === true;
+  if (!active) return false;
+  const end = u.subscriptionEndDate?.toDate?.() ||
+    (u.subscriptionEndDate?.seconds ? new Date(u.subscriptionEndDate.seconds * 1000) : null);
+  return !end || end.getTime() > Date.now();
+}
+
+function serializeUser(doc) {
+  const data = doc.data() || {};
+  return {
+    uid: doc.id,
+    firstName: data.firstName || '',
+    lastName: data.lastName || '',
+    email: data.email || '',
+    establishment: data.establishment || '',
+    classId: data.classId || '',
+    profilePicture: data.profilePicture || null,
+    premium: data.premium || false,
+    isUnlocked: data.isUnlocked || false,
+    hasDeposited: data.hasDeposited || false,
+    subscriptionStatus: data.subscriptionStatus || 'none',
+    subscriptionPlan: data.subscriptionPlan || null,
+    subscriptionPrice: data.subscriptionPrice || null,
+    subscriptionRequestDate: data.subscriptionRequestDate || null,
+    subscriptionEndDate: data.subscriptionEndDate || null,
+    subscriptionPaymentMethod: data.subscriptionPaymentMethod || null,
+    accountStatus: data.accountStatus || 'active',
+    role: data.role || 'student',
+    totalStudyTime: data.totalStudyTime || 0,
+    createdAt: data.createdAt || null,
+    lastLogin: data.lastLogin || null
+  };
+}
+
+// ────────────────────────────────────────────────────────────────
+// ACTIONS
+// ────────────────────────────────────────────────────────────────
+
+async function checkAdmin() {
+  return { ok: true };
+}
+
+async function getDashboard() {
+  const { db } = getAdminServices();
+  const usersSnap = await db.collection('users').get();
+  const users = usersSnap.docs.map(serializeUser);
+
+  const totalUsers = users.length;
+  const premiumUsers = users.filter(u => isPremiumActive(u)).length;
+  const pendingRequests = users.filter(u => u.subscriptionStatus === 'pending');
+  const pendingSubscriptions = pendingRequests.length;
+  const blockedUsers = users.filter(u => u.accountStatus === 'blocked').length;
+
+  const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const newThisWeek = users.filter(u => {
+    const created = u.createdAt?.toDate?.() ||
+      (u.createdAt?.seconds ? new Date(u.createdAt.seconds * 1000) : null);
+    return created && created.getTime() > oneWeekAgo;
+  }).length;
+
+  return {
+    stats: {
+      totalUsers,
+      premiumUsers,
+      pendingSubscriptions,
+      blockedUsers,
+      newThisWeek
+    },
+    pendingRequests: pendingRequests.slice(0, 10)
+  };
+}
+
+async function getSubscriptions() {
+  const { db } = getAdminServices();
+  const snap = await db.collection('users').orderBy('createdAt', 'desc').limit(500).get();
+  return { users: snap.docs.map(serializeUser) };
+}
+
+async function getUsers({ page = 0, pageSize = 20, sort = 'recent' }) {
+  const { db } = getAdminServices();
+  let query = db.collection('users');
+
+  if (sort === 'name') {
+    // Fallback : on charge et on trie côté serveur
+    const snap = await query.limit(500).get();
+    const users = snap.docs.map(serializeUser);
+    users.sort((a, b) => {
+      const na = `${a.firstName} ${a.lastName}`.toLowerCase();
+      const nb = `${b.firstName} ${b.lastName}`.toLowerCase();
+      return na.localeCompare(nb);
+    });
+    const start = page * pageSize;
+    return { users: users.slice(start, start + pageSize) };
+  }
+
+  if (sort === 'email') {
+    const snap = await query.limit(500).get();
+    const users = snap.docs.map(serializeUser);
+    users.sort((a, b) => (a.email || '').localeCompare(b.email || ''));
+    const start = page * pageSize;
+    return { users: users.slice(start, start + pageSize) };
+  }
+
+  // Par défaut : plus récents
+  const snap = await query.orderBy('createdAt', 'desc')
+    .offset(page * pageSize)
+    .limit(pageSize)
+    .get();
+
+  return { users: snap.docs.map(serializeUser) };
+}
+
+async function approveSubscription({ uid }) {
+  const { db, FieldValue } = getAdminServices();
+  const userRef = db.collection('users').doc(uid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) throw { status: 404, message: 'Utilisateur introuvable.' };
+
+  const data = userSnap.data();
+  const plan = data.subscriptionPlan || 'monthly';
+
+  // Calculer la date de fin
+  const now = new Date();
+  const endDate = new Date(now);
+  if (plan === 'annual') endDate.setFullYear(endDate.getFullYear() + 1);
+  else endDate.setMonth(endDate.getMonth() + 1);
+
+  await userRef.update({
+    premium: true,
+    isUnlocked: true,
+    hasDeposited: true,
+    subscriptionStatus: 'active',
+    subscriptionStartDate: FieldValue.serverTimestamp(),
+    subscriptionEndDate: endDate,
+    updatedAt: FieldValue.serverTimestamp()
+  });
+
+  // Notifier l'utilisateur
+  await db.collection('users').doc(uid).collection('notifications').add({
+    title: '🎉 Premium activé !',
+    body: `Ton abonnement ${plan === 'annual' ? 'annuel' : 'mensuel'} a été activé. Tu as maintenant accès à tous les contenus.`,
+    type: 'success',
+    read: false,
+    createdAt: FieldValue.serverTimestamp()
+  });
+
+  return { ok: true };
+}
+
+async function rejectSubscription({ uid }) {
+  const { db, FieldValue } = getAdminServices();
+  const userRef = db.collection('users').doc(uid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) throw { status: 404, message: 'Utilisateur introuvable.' };
+
+  await userRef.update({
+    subscriptionStatus: 'rejected',
+    updatedAt: FieldValue.serverTimestamp()
+  });
+
+  await db.collection('users').doc(uid).collection('notifications').add({
+    title: '❌ Demande refusée',
+    body: 'Ta demande d\'abonnement n\'a pas pu être validée. Contacte le support pour plus d\'informations.',
+    type: 'error',
+    read: false,
+    createdAt: FieldValue.serverTimestamp()
+  });
+
+  return { ok: true };
+}
+
+async function revokePremium({ uid }) {
+  const { db, FieldValue } = getAdminServices();
+  const userRef = db.collection('users').doc(uid);
+
+  await userRef.update({
+    premium: false,
+    isUnlocked: false,
+    hasDeposited: false,
+    subscriptionStatus: 'expired',
+    updatedAt: FieldValue.serverTimestamp()
+  });
+
+  await db.collection('users').doc(uid).collection('notifications').add({
+    title: '⚠️ Abonnement révoqué',
+    body: 'Ton accès Premium a été suspendu. Contacte le support si tu penses qu\'il s\'agit d\'une erreur.',
+    type: 'warning',
+    read: false,
+    createdAt: FieldValue.serverTimestamp()
+  });
+
+  return { ok: true };
+}
+
+async function toggleBlockUser({ uid }) {
+  const { db, FieldValue } = getAdminServices();
+  const userRef = db.collection('users').doc(uid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) throw { status: 404, message: 'Utilisateur introuvable.' };
+
+  const data = userSnap.data();
+  if (data.role === 'admin') throw { status: 403, message: 'Impossible de bloquer un admin.' };
+
+  const isBlocked = data.accountStatus === 'blocked';
+  await userRef.update({
+    accountStatus: isBlocked ? 'active' : 'blocked',
+    updatedAt: FieldValue.serverTimestamp()
+  });
+
+  return { ok: true, blocked: !isBlocked };
+}
+
+async function deleteUser({ uid }) {
+  const { db, auth } = getAdminServices();
+  const userRef = db.collection('users').doc(uid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) throw { status: 404, message: 'Utilisateur introuvable.' };
+
+  const data = userSnap.data();
+  if (data.role === 'admin') throw { status: 403, message: 'Impossible de supprimer un admin.' };
+
+  // Supprimer le profil Firestore
+  await userRef.delete();
+
+  // Supprimer le compte Firebase Auth
+  try {
+    await auth.deleteUser(uid);
+  } catch (e) {
+    console.warn('Auth delete failed:', e.message);
+  }
+
+  return { ok: true };
+}
+
+async function sendNotification({ target, email, title, message, type }) {
+  const { db, FieldValue } = getAdminServices();
+
+  let usersSnap;
+  if (target === 'specific') {
+    if (!email) throw { status: 400, message: 'Email requis.' };
+    usersSnap = await db.collection('users').where('email', '==', email).limit(1).get();
+    if (usersSnap.empty) throw { status: 404, message: 'Utilisateur introuvable.' };
+  } else if (target === 'premium') {
+    usersSnap = await db.collection('users').where('premium', '==', true).get();
+  } else if (target === 'free') {
+    usersSnap = await db.collection('users').where('premium', '!=', true).get();
+  } else {
+    usersSnap = await db.collection('users').get();
+  }
+
+  const now = FieldValue.serverTimestamp();
+  const batch = db.batch();
+  let count = 0;
+
+  usersSnap.docs.forEach(doc => {
+    const notifRef = db.collection('users').doc(doc.id).collection('notifications').doc();
+    batch.set(notifRef, {
+      title,
+      body: message,
+      type: type || 'info',
+      read: false,
+      createdAt: now
+    });
+    count++;
+  });
+
+  await batch.commit();
+
+  // Historique admin
+  await db.collection('admin_notifications').add({
+    title,
+    message,
+    type: type || 'info',
+    target,
+    targetLabel: target === 'specific' ? email : target,
+    count,
+    sentBy: 'admin',
+    createdAt: now
+  });
+
+  return { ok: true, count };
+}
+
+async function getNotificationHistory() {
+  const { db } = getAdminServices();
+  const snap = await db.collection('admin_notifications')
+    .orderBy('createdAt', 'desc')
+    .limit(30)
+    .get();
+  return {
+    history: snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  };
+}
+
+async function getAvis() {
+  const { db } = getAdminServices();
+  const snap = await db.collection('avis')
+    .orderBy('createdAt', 'desc')
+    .limit(100)
+    .get();
+  return {
+    avis: snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  };
+}
+
+async function getStats() {
+  const { db } = getAdminServices();
+  const usersSnap = await db.collection('users').get();
+  const users = usersSnap.docs.map(serializeUser);
+
+  const totalUsers = users.length;
+  const premiumUsers = users.filter(u => isPremiumActive(u)).length;
+  const blockedUsers = users.filter(u => u.accountStatus === 'blocked').length;
+
+  const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const newThisWeek = users.filter(u => {
+    const created = u.createdAt?.toDate?.() ||
+      (u.createdAt?.seconds ? new Date(u.createdAt.seconds * 1000) : null);
+    return created && created.getTime() > oneWeekAgo;
+  }).length;
+
+  // Répartition par matière (via readParts si dispo)
+  const subjects = {
+    mathematiques: 0,
+    physique: 0,
+    chimie: 0,
+    svt: 0
+  };
+  users.forEach(u => {
+    const parts = u.readParts || [];
+    if (Array.isArray(parts)) {
+      parts.forEach(p => {
+        const key = String(p).split('_')[0];
+        if (subjects[key] !== undefined) subjects[key]++;
+      });
+    }
+  });
+
+  return {
+    stats: { totalUsers, premiumUsers, newThisWeek, blockedUsers, subjects }
+  };
+}
+
+// ────────────────────────────────────────────────────────────────
+// HANDLER
+// ────────────────────────────────────────────────────────────────
+module.exports = async function handler(request, response) {
+  if (request.method !== 'POST') {
+    response.setHeader('Allow', 'POST');
+    return jsonError(response, 405, 'Méthode non autorisée.');
+  }
+  if (rateLimited(clientIp(request))) {
+    return jsonError(response, 429, 'Trop de demandes. Réessaie.');
+  }
+
+  let adminContext;
+  try {
+    adminContext = await requireAdmin(request);
+  } catch (e) {
+    if (e.status) return jsonError(response, e.status, e.message);
+    console.error('Admin auth error:', e.message);
+    return jsonError(response, 503, 'Service temporairement indisponible.');
+  }
+
+  const body = request.body && typeof request.body === 'object' ? request.body : {};
+  const action = body.action;
+
+  try {
+    switch (action) {
+      case 'checkAdmin': return response.status(200).json(await checkAdmin());
+      case 'getDashboard': return response.status(200).json(await getDashboard());
+      case 'getSubscriptions': return response.status(200).json(await getSubscriptions());
+      case 'getUsers': return response.status(200).json(await getUsers(body));
+      case 'approveSubscription': return response.status(200).json(await approveSubscription(body));
+      case 'rejectSubscription': return response.status(200).json(await rejectSubscription(body));
+      case 'revokePremium': return response.status(200).json(await revokePremium(body));
+      case 'toggleBlockUser': return response.status(200).json(await toggleBlockUser(body));
+      case 'deleteUser': return response.status(200).json(await deleteUser(body));
+      case 'sendNotification': return response.status(200).json(await sendNotification(body));
+      case 'getNotificationHistory': return response.status(200).json(await getNotificationHistory());
+      case 'getAvis': return response.status(200).json(await getAvis());
+      case 'getStats': return response.status(200).json(await getStats());
+      default:
+        return jsonError(response, 400, 'Action inconnue.');
+    }
+  } catch (error) {
+    console.error(`Admin action "${action}" failed:`, error.message);
+    if (error.status) return jsonError(response, error.status, error.message);
+    return jsonError(response, 500, 'Erreur serveur.');
+  }
+};
