@@ -8,8 +8,8 @@
   <title>ARVEXA Admin · Connexion</title>
 
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="icon-admin-192.png" type="image/png">
-  <link rel="apple-touch-icon" href="icon-admin-192.png">
+  <link rel="icon" href="icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="icon.png">
 
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
@@ -28,6 +28,7 @@
       --text-muted: #5A5A4A;
       --border-soft: rgba(255, 255, 255, 0.06);
       --card-border: rgba(184, 134, 11, 0.15);
+      --input-bg: rgba(255, 255, 255, 0.03);
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
@@ -37,7 +38,6 @@
 
     body {
       font-family: 'Inter', -apple-system, 'Segoe UI', Arial, sans-serif;
-      background: #0A0A0A;
       color: var(--text-light);
       font-size: 14px;
       line-height: 1.5;
@@ -97,39 +97,112 @@
       line-height: 1.5;
     }
 
-    .status {
-      padding: 20px;
+    .card {
+      padding: 24px 20px;
       background: rgba(20, 20, 20, 0.85);
       border: 1px solid var(--card-border);
       border-radius: 16px;
       display: flex;
       flex-direction: column;
-      align-items: center;
       gap: 14px;
+      text-align: left;
     }
 
-    .spinner {
-      width: 32px;
-      height: 32px;
-      border: 3px solid rgba(184, 134, 11, 0.15);
-      border-top-color: var(--accent-bright);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
 
-    .status p {
-      font-size: 13px;
+    .field label {
+      font-size: 12px;
+      font-weight: 600;
       color: var(--text-dim);
+      letter-spacing: 0.2px;
     }
+
+    .input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      background: var(--input-bg);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      transition: all 0.2s ease;
+      overflow: hidden;
+    }
+    .input-wrap:focus-within {
+      border-color: rgba(184, 134, 11, 0.4);
+      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.08);
+    }
+    .input-wrap.is-error {
+      border-color: rgba(231, 76, 60, 0.4);
+    }
+
+    .input-wrap > i {
+      padding: 0 4px 0 14px;
+      color: var(--text-muted);
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .input-wrap:focus-within > i { color: var(--accent-bright); }
+
+    .input-wrap input {
+      flex: 1;
+      min-width: 0;
+      padding: 12px 14px 12px 10px;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-light);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .input-wrap input::placeholder { color: var(--text-muted); }
+    .input-wrap input:-webkit-autofill {
+      -webkit-box-shadow: 0 0 0 30px #141414 inset !important;
+      -webkit-text-fill-color: var(--text-light) !important;
+    }
+
+    .toggle-pwd {
+      width: 34px;
+      height: 34px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      margin-right: 4px;
+      border-radius: 8px;
+      transition: all 0.2s ease;
+    }
+    .toggle-pwd:hover { color: var(--accent-bright); background: rgba(184, 134, 11, 0.06); }
+
+    .error-msg {
+      display: none;
+      padding: 10px 14px;
+      border-radius: 9px;
+      background: rgba(231, 76, 60, 0.08);
+      border: 1px solid rgba(231, 76, 60, 0.2);
+      color: var(--danger-light);
+      font-size: 12.5px;
+      line-height: 1.5;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .error-msg.show { display: flex; }
+    .error-msg i { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
 
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      padding: 12px 24px;
-      border-radius: 12px;
+      padding: 13px 20px;
+      border-radius: 10px;
       border: none;
       font-family: inherit;
       font-size: 14px;
@@ -137,49 +210,96 @@
       cursor: pointer;
       text-decoration: none;
       transition: all 0.25s ease;
-      min-height: 46px;
-      margin-top: 4px;
+      min-height: 48px;
+      width: 100%;
     }
     .btn-primary {
       background: linear-gradient(135deg, var(--accent-bright), var(--accent));
       color: #0A0A0A;
       box-shadow: 0 4px 20px rgba(184, 134, 11, 0.2);
     }
-    .btn-primary:hover {
+    .btn-primary:hover:not(:disabled) {
       transform: translateY(-2px);
       box-shadow: 0 8px 28px rgba(184, 134, 11, 0.35);
+    }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
     }
     .btn-secondary {
       background: rgba(255, 255, 255, 0.04);
       color: var(--text-dim);
       border: 1px solid var(--border-soft);
     }
-    .btn-secondary:hover {
-      color: var(--text-light);
-      border-color: rgba(255, 255, 255, 0.12);
-    }
+    .btn-secondary:hover { color: var(--text-light); border-color: rgba(255, 255, 255, 0.12); }
 
-    .error-box {
+    .btn .spinner {
       display: none;
-      padding: 12px 16px;
-      border-radius: 10px;
-      background: rgba(231, 76, 60, 0.08);
-      border: 1px solid rgba(231, 76, 60, 0.2);
-      color: var(--danger-light);
-      font-size: 12.5px;
-      line-height: 1.5;
-      text-align: left;
-      width: 100%;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(10, 10, 10, 0.2);
+      border-top-color: #0A0A0A;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
     }
-    .error-box.show { display: flex; align-items: flex-start; gap: 8px; }
-    .error-box i { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+    .btn.loading .spinner { display: block; }
+    .btn.loading .btn-text { display: none; }
+    .btn.loading .btn-icon { display: none; }
 
-    .actions-row {
-      display: flex;
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 20px;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+    .back-link:hover { color: var(--accent-bright); }
+
+    .denied {
+      display: none;
+      padding: 24px 20px;
+      background: rgba(20, 20, 20, 0.85);
+      border: 1px solid rgba(231, 76, 60, 0.2);
+      border-radius: 16px;
       flex-direction: column;
-      gap: 8px;
-      width: 100%;
-      margin-top: 8px;
+      align-items: center;
+      gap: 14px;
+    }
+    .denied.show { display: flex; }
+    .denied-icon { font-size: 40px; }
+    .denied-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--danger-light);
+    }
+    .denied-text {
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.6;
+      text-align: center;
+    }
+
+    @media (max-width: 480px) {
+      .logo { width: 60px; height: 60px; font-size: 24px; }
+      h1 { font-size: 22px; }
+      .card { padding: 20px 16px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+
+    a:focus-visible, button:focus-visible, input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
   </style>
 </head>
@@ -188,26 +308,78 @@
   <div class="wrap">
     <div class="logo">A</div>
     <h1>ARVEXA <em>Admin</em></h1>
-    <p class="sub">Vérification de la session en cours...</p>
+    <p class="sub">Connecte-toi avec ton compte administrateur</p>
 
-    <div class="status" id="statusBox">
-      <div class="spinner"></div>
-      <p id="statusText">Chargement...</p>
+    <!-- FORMULAIRE -->
+    <div class="card" id="loginCard">
+      <form id="loginForm" novalidate>
+
+        <div class="field">
+          <label for="emailInput">Email</label>
+          <div class="input-wrap" id="emailWrap">
+            <i class="fas fa-envelope"></i>
+            <input
+              type="email"
+              id="emailInput"
+              placeholder="admin@exemple.com"
+              autocomplete="email"
+              inputmode="email"
+              required
+            >
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="passwordInput">Mot de passe</label>
+          <div class="input-wrap" id="passwordWrap">
+            <i class="fas fa-lock"></i>
+            <input
+              type="password"
+              id="passwordInput"
+              placeholder="Ton mot de passe"
+              autocomplete="current-password"
+              required
+            >
+            <button
+              type="button"
+              class="toggle-pwd"
+              id="togglePassword"
+              aria-label="Afficher le mot de passe"
+            >
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="error-msg" id="errorMsg">
+          <i class="fas fa-exclamation-circle"></i>
+          <span id="errorText">Erreur</span>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="loginBtn">
+          <span class="btn-icon"><i class="fas fa-sign-in-alt"></i></span>
+          <span class="btn-text">Se connecter</span>
+          <span class="spinner"></span>
+        </button>
+
+      </form>
     </div>
 
-    <div class="error-box" id="errorBox">
-      <i class="fas fa-exclamation-circle"></i>
-      <span id="errorText"></span>
-    </div>
-
-    <div class="actions-row" id="actionsRow" style="display:none">
-      <a href="admin.html" class="btn btn-primary">
-        <i class="fas fa-shield-halved"></i> Accéder à la console
-      </a>
-      <button type="button" class="btn btn-secondary" id="logoutBtn">
+    <!-- ACCÈS REFUSÉ -->
+    <div class="denied" id="deniedCard">
+      <div class="denied-icon">🚫</div>
+      <div class="denied-title">Accès refusé</div>
+      <p class="denied-text" id="deniedText">
+        Ce compte n'est pas administrateur.
+      </p>
+      <button type="button" class="btn btn-secondary" id="deniedLogoutBtn">
         <i class="fas fa-sign-out-alt"></i> Utiliser un autre compte
       </button>
     </div>
+
+    <a href="https://arvexaschool.vercel.app" class="back-link">
+      <i class="fas fa-arrow-left"></i> Retour au site
+    </a>
   </div>
 
   <script type="importmap">
@@ -222,16 +394,17 @@
 
   <script type="module">
   // ================================================================
-  // LOGIN ADMIN — Vérifie Firebase puis redirige
+  // ADMIN LOGIN — Connexion directe sur admin-89.vercel.app
   // ================================================================
 
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
   import {
     getAuth,
-    onAuthStateChanged,
     setPersistence,
     browserLocalPersistence,
-    signOut
+    signInWithEmailAndPassword,
+    signOut,
+    onAuthStateChanged
   } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-auth.js";
   import {
     getFirestore,
@@ -239,17 +412,21 @@
     getDoc
   } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
 
+  // ═══════════════════════════════════════════════════════════════
+  // CONFIG
+  // ═══════════════════════════════════════════════════════════════
   const ADMIN_EMAILS = ['gagneavecia@gmail.com'];
 
-  const app = initializeApp({
+  const firebaseConfig = {
     apiKey: "AIzaSyDHscOXw3rLuhV6z1Cny-bdYCumqpnG7QE",
     authDomain: "arvexa-fbf10.firebaseapp.com",
     projectId: "arvexa-fbf10",
     storageBucket: "arvexa-fbf10.firebasestorage.app",
     messagingSenderId: "920108330053",
     appId: "1:920108330053:web:f532d71cbc2c824bc7472c"
-  });
+  };
 
+  const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
 
@@ -257,72 +434,222 @@
     await setPersistence(auth, browserLocalPersistence);
   } catch (e) {}
 
+  // ═══════════════════════════════════════════════════════════════
+  // DOM
+  // ═══════════════════════════════════════════════════════════════
   const $ = (id) => document.getElementById(id);
-  const statusText = $('statusText');
-  const statusBox = $('statusBox');
-  const errorBox = $('errorBox');
+
+  const loginCard = $('loginCard');
+  const deniedCard = $('deniedCard');
+  const deniedText = $('deniedText');
+  const loginForm = $('loginForm');
+  const emailInput = $('emailInput');
+  const passwordInput = $('passwordInput');
+  const emailWrap = $('emailWrap');
+  const passwordWrap = $('passwordWrap');
+  const togglePassword = $('togglePassword');
+  const loginBtn = $('loginBtn');
+  const errorMsg = $('errorMsg');
   const errorText = $('errorText');
-  const actionsRow = $('actionsRow');
-  const logoutBtn = $('logoutBtn');
+  const deniedLogoutBtn = $('deniedLogoutBtn');
 
-  function showError(msg) {
-    statusBox.style.display = 'none';
-    errorText.textContent = msg;
-    errorBox.classList.add('show');
+  // ═══════════════════════════════════════════════════════════════
+  // UI HELPERS
+  // ═══════════════════════════════════════════════════════════════
+  function showError(message) {
+    errorText.textContent = message;
+    errorMsg.classList.add('show');
   }
 
-  function showSuccess() {
-    statusBox.style.display = 'none';
-    errorBox.classList.remove('show');
-    actionsRow.style.display = 'flex';
+  function hideError() {
+    errorMsg.classList.remove('show');
+    emailWrap.classList.remove('is-error');
+    passwordWrap.classList.remove('is-error');
   }
 
-  // Vérifier après 5 secondes max
-  const timeout = setTimeout(() => {
-    showError('Délai de connexion dépassé. Vérifie ta connexion internet.');
-  }, 5000);
+  function setLoading(loading) {
+    loginBtn.disabled = loading;
+    loginBtn.classList.toggle('loading', loading);
+  }
 
-  onAuthStateChanged(auth, async (user) => {
-    clearTimeout(timeout);
+  function showDenied(message) {
+    loginCard.style.display = 'none';
+    deniedCard.classList.add('show');
+    if (message) deniedText.textContent = message;
+  }
 
-    if (!user) {
-      statusText.textContent = 'Aucune session trouvée.';
-      showError('Tu n\'es pas connecté. Va sur le site principal pour te connecter, puis reviens ici.');
-      return;
+  function showLogin() {
+    deniedCard.classList.remove('show');
+    loginCard.style.display = 'block';
+    hideError();
+    setLoading(false);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // VERIFICATION ADMIN
+  // ═══════════════════════════════════════════════════════════════
+  async function checkIsAdmin(user) {
+    if (!user) return false;
+
+    // 1) Email en dur
+    if (ADMIN_EMAILS.includes(user.email)) return true;
+
+    // 2) Rôle Firestore
+    try {
+      const snap = await getDoc(doc(db, 'users', user.uid));
+      if (snap.exists() && snap.data().role === 'admin') return true;
+    } catch (e) {
+      console.warn('Erreur check admin Firestore:', e.message);
     }
 
-    // Vérifier si admin
-    statusText.textContent = 'Vérification des autorisations...';
+    return false;
+  }
 
-    let isAdmin = ADMIN_EMAILS.includes(user.email);
+  // ═══════════════════════════════════════════════════════════════
+  // REDIRECTION
+  // ═══════════════════════════════════════════════════════════════
+  function redirectToConsole() {
+    window.location.replace('admin.html');
+  }
 
-    if (!isAdmin) {
-      try {
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        if (snap.exists() && snap.data().role === 'admin') {
-          isAdmin = true;
-        }
-      } catch (e) {}
-    }
-
-    if (!isAdmin) {
-      showError('Accès refusé. Ce compte n\'est pas administrateur.');
-      return;
-    }
-
-    // ✅ Tout est bon
-    statusText.textContent = 'Connecté en tant qu\'admin';
-    showSuccess();
+  // ═══════════════════════════════════════════════════════════════
+  // TOGGLE MOT DE PASSE
+  // ═══════════════════════════════════════════════════════════════
+  togglePassword.addEventListener('click', () => {
+    const isPassword = passwordInput.type === 'password';
+    passwordInput.type = isPassword ? 'text' : 'password';
+    togglePassword.querySelector('i').className = isPassword ? 'fas fa-eye-slash' : 'fas fa-eye';
+    togglePassword.setAttribute('aria-label', isPassword ? 'Masquer' : 'Afficher');
   });
 
-  logoutBtn.addEventListener('click', async () => {
-    if (!confirm('Se déconnecter ?')) return;
+  // ═══════════════════════════════════════════════════════════════
+  // SOUMISSION DU FORMULAIRE
+  // ═══════════════════════════════════════════════════════════════
+  let isSubmitting = false;
+
+  loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
+
+    hideError();
+
+    // Validation basique
+    if (!email) {
+      emailWrap.classList.add('is-error');
+      showError('Entre ton adresse email');
+      emailInput.focus();
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      emailWrap.classList.add('is-error');
+      showError('Format d\'email invalide');
+      emailInput.focus();
+      return;
+    }
+
+    if (!password) {
+      passwordWrap.classList.add('is-error');
+      showError('Entre ton mot de passe');
+      passwordInput.focus();
+      return;
+    }
+
+    if (password.length < 6) {
+      passwordWrap.classList.add('is-error');
+      showError('Le mot de passe est trop court');
+      passwordInput.focus();
+      return;
+    }
+
+    isSubmitting = true;
+    setLoading(true);
+
+    try {
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      const user = credential.user;
+
+      // Vérifier le rôle admin
+      const isAdmin = await checkIsAdmin(user);
+
+      if (!isAdmin) {
+        try { await signOut(auth); } catch (_) {}
+        showDenied(`Le compte « ${email} » n'est pas administrateur.`);
+        isSubmitting = false;
+        setLoading(false);
+        return;
+      }
+
+      // ✅ Admin confirmé → redirection
+      redirectToConsole();
+
+    } catch (error) {
+      console.error('Erreur login:', error);
+
+      let message = 'Une erreur est survenue. Réessaie.';
+
+      switch (error.code) {
+        case 'auth/user-not-found':
+        case 'auth/wrong-password':
+        case 'auth/invalid-credential':
+          message = 'Email ou mot de passe incorrect.';
+          break;
+        case 'auth/invalid-email':
+          message = 'Adresse email invalide.';
+          break;
+        case 'auth/too-many-requests':
+          message = 'Trop de tentatives. Réessaie dans quelques minutes.';
+          break;
+        case 'auth/network-request-failed':
+          message = 'Problème de connexion internet.';
+          break;
+        case 'auth/user-disabled':
+          message = 'Ce compte a été désactivé.';
+          break;
+        default:
+          message = error.message || message;
+      }
+
+      showError(message);
+      setLoading(false);
+      isSubmitting = false;
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // DÉCONNEXION DEPUIS L'ÉCRAN "REFUSÉ"
+  // ═══════════════════════════════════════════════════════════════
+  deniedLogoutBtn.addEventListener('click', async () => {
     try { await signOut(auth); } catch (e) {}
-    // Rediriger vers le site principal ou recharger
-    window.location.reload();
+    emailInput.value = '';
+    passwordInput.value = '';
+    isSubmitting = false;
+    showLogin();
+    setTimeout(() => emailInput.focus(), 100);
   });
 
-  console.log('🔐 ARVEXA Admin — Login');
+  // ═══════════════════════════════════════════════════════════════
+  // SI DÉJÀ CONNECTÉ EN TANT QU'ADMIN → REDIRECT IMMÉDIAT
+  // ═══════════════════════════════════════════════════════════════
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) return; // Pas connecté → formulaire visible par défaut
+
+    // Utilisateur déjà restauré → vérifier admin
+    const isAdmin = await checkIsAdmin(user);
+
+    if (isAdmin) {
+      redirectToConsole();
+    } else {
+      // Connecté mais pas admin : déconnexion silencieuse + formulaire
+      try { await signOut(auth); } catch (e) {}
+      // Le formulaire est déjà affiché par défaut
+    }
+  });
+
+  console.log('🔐 ARVEXA Admin — Login direct');
   </script>
 </body>
 </html>
