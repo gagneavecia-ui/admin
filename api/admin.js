@@ -16,13 +16,41 @@ let adminServices;
 
 function getAdminServices() {
   if (adminServices) return adminServices;
+
   const credentials = process.env.FIREBASE_ADMIN_CREDENTIALS;
-  if (!credentials) throw new Error('firebase_admin_not_configured');
-  const admin = require('firebase-admin');
-  const serviceAccount = JSON.parse(credentials);
-  if (!admin.apps.length) {
-    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+
+  if (!credentials) {
+    console.error('[ADMIN DEBUG] FIREBASE_ADMIN_CREDENTIALS is missing or empty.');
+    throw new Error('firebase_admin_not_configured');
   }
+
+  console.error('[ADMIN DEBUG] Credentials length:', credentials.length);
+  console.error('[ADMIN DEBUG] Starts with:', credentials.slice(0, 40));
+  console.error('[ADMIN DEBUG] Ends with:', credentials.slice(-40));
+
+  let serviceAccount;
+  try {
+    serviceAccount = JSON.parse(credentials);
+  } catch (parseError) {
+    console.error('[ADMIN DEBUG] JSON.parse failed:', parseError.message);
+    throw new Error('firebase_admin_invalid_json');
+  }
+
+  console.error('[ADMIN DEBUG] service_account project_id:', serviceAccount.project_id);
+  console.error('[ADMIN DEBUG] service_account client_email:', serviceAccount.client_email);
+  console.error('[ADMIN DEBUG] private_key length:', (serviceAccount.private_key || '').length);
+
+  const admin = require('firebase-admin');
+
+  if (!admin.apps.length) {
+    try {
+      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    } catch (initError) {
+      console.error('[ADMIN DEBUG] initializeApp failed:', initError.message);
+      throw initError;
+    }
+  }
+
   adminServices = {
     auth: admin.auth(),
     db: admin.firestore(),
@@ -55,10 +83,16 @@ function jsonError(response, status, error) {
 async function verifyFirebaseToken(request) {
   const authorization = request.headers.authorization || '';
   const match = authorization.match(/^Bearer\s+(.+)$/i);
-  if (!match) return null;
+  if (!match) {
+    console.error('[AUTH DEBUG] No Bearer token in Authorization header.');
+    return null;
+  }
   try {
-    return await getAdminServices().auth.verifyIdToken(match[1]);
-  } catch (_) {
+    const { auth } = getAdminServices();
+    return await auth.verifyIdToken(match[1]);
+  } catch (error) {
+    console.error('[AUTH DEBUG] verifyIdToken failed:', error.message);
+    console.error('[AUTH DEBUG] error.code:', error.code || 'no-code');
     return null;
   }
 }
