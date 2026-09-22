@@ -1,26 +1,24 @@
 {
-  "name": "ARVEXA Admin",
+  "name": "ARVEXA Admin — Console",
   "short_name": "ARVEXA Admin",
-  "description": "Panneau d'administration ARVEXA School",
-  "start_url": "/",
-  "scope": "/",
+  "description": "Console d'administration ARVEXA School",
+  "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#0A0A0A",
   "theme_color": "#0A0A0A",
   "lang": "fr",
+  "dir": "ltr",
+  "categories": ["business", "productivity"],
   "icons": [
-    {
-      "src": "icon.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icon.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "icon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Dashboard", "url": "./admin.html", "icons": [{ "src": "icon-admin-192.png", "sizes": "192x192" }] },
+    { "name": "Finance", "url": "./admin.html", "icons": [{ "src": "icon-admin-192.png", "sizes": "192x192" }] },
+    { "name": "Utilisateurs", "url": "./admin.html", "icons": [{ "src": "icon-admin-192.png", "sizes": "192x192" }] }
   ]
 }
