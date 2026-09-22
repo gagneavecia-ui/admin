@@ -744,27 +744,209 @@
 
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 5px; }
+
+        /* ============================================================
+       MODALE MOT DE PASSE CONSOLE
+       ============================================================ */
+    .pwd-gate {
+      position: fixed;
+      inset: 0;
+      z-index: 100000;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      animation: fadePwd 0.3s ease;
+    }
+    .pwd-gate.show { display: flex; }
+    @keyframes fadePwd { from { opacity: 0; } to { opacity: 1; } }
+
+    .pwd-gate-box {
+      width: 100%;
+      max-width: 400px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 16px;
+      padding: 28px 24px;
+      position: relative;
+      animation: popPwd 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+    @keyframes popPwd {
+      from { opacity: 0; transform: scale(0.95) translateY(10px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .pwd-gate-icon {
+      display: block;
+      text-align: center;
+      font-size: 40px;
+      margin-bottom: 12px;
+    }
+
+    .pwd-gate-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+      text-align: center;
+      margin-bottom: 4px;
+    }
+    .pwd-gate-title em {
+      color: var(--gold);
+      font-style: italic;
+    }
+
+    .pwd-gate-sub {
+      font-size: 12.5px;
+      color: var(--text-dim);
+      text-align: center;
+      line-height: 1.5;
+      margin-bottom: 18px;
+    }
+
+    .pwd-gate-user {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 9px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      margin-bottom: 16px;
+      font-size: 12px;
+    }
+    .pwd-gate-user-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--gold);
+      color: #0A0A0A;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    .pwd-gate-user-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-dim);
+    }
+
+    .pwd-gate-field {
+      position: relative;
+      display: flex;
+      align-items: center;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      transition: var(--transition);
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .pwd-gate-field:focus-within {
+      border-color: var(--gold-dim);
+      box-shadow: 0 0 0 3px rgba(224, 184, 74, 0.1);
+    }
+    .pwd-gate-field.error {
+      border-color: rgba(231, 76, 60, 0.5);
+      animation: shakePwd 0.4s ease;
+    }
+    @keyframes shakePwd {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-6px); }
+      75% { transform: translateX(6px); }
+    }
+    .pwd-gate-field > i {
+      padding: 0 4px 0 14px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .pwd-gate-field input {
+      flex: 1;
+      min-width: 0;
+      padding: 13px 14px 13px 10px;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-size: 15px;
+      font-family: inherit;
+      letter-spacing: 0.5px;
+    }
+    .pwd-gate-field input::placeholder { color: var(--text-muted); }
+
+    .pwd-gate-toggle {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      margin-right: 6px;
+    }
+    .pwd-gate-toggle:hover { color: var(--gold); }
+
+    .pwd-gate-error {
+      display: none;
+      font-size: 12px;
+      color: var(--red);
+      margin-bottom: 12px;
+      padding-left: 4px;
+      align-items: center;
+      gap: 6px;
+    }
+    .pwd-gate-error.show { display: flex; }
+
+    .pwd-gate-btn {
+      width: 100%;
+      padding: 13px;
+      border: none;
+      border-radius: 10px;
+      background: var(--gold);
+      color: #0A0A0A;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: var(--transition);
+      min-height: 48px;
+    }
+    .pwd-gate-btn:not(:disabled):hover { background: #F0CC65; }
+    .pwd-gate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .pwd-gate-btn .spinner {
+      display: none;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(10, 10, 10, 0.3);
+      border-top-color: #0A0A0A;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    .pwd-gate-btn.loading .spinner { display: block; }
+    .pwd-gate-btn.loading .pwd-gate-btn-text { display: none; }
+
   </style>
 </head>
 <body>
     
-<script>
-(function() {
-  const SESSION_KEY = 'arvexa_admin_session';
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) { window.location.replace('index.html'); return; }
-    const data = JSON.parse(raw);
-    if (!data.expiresAt || data.expiresAt < Date.now()) {
-      localStorage.removeItem(SESSION_KEY);
-      window.location.replace('index.html');
-    }
-  } catch (e) {
-    window.location.replace('index.html');
-  }
-})();
-</script>
-
   <!-- BOOT -->
   <div id="bootScreen" class="fs">
     <div class="fs-icon"><div class="spinner"></div></div>
@@ -1200,6 +1382,38 @@
     </div>
   </div>
 
+    <!-- MODALE MOT DE PASSE CONSOLE -->
+  <div class="pwd-gate" id="pwdGate">
+    <div class="pwd-gate-box">
+      <span class="pwd-gate-icon">🔐</span>
+      <h2 class="pwd-gate-title">Console <em>sécurisée</em></h2>
+      <p class="pwd-gate-sub">Entre le mot de passe pour accéder à la console</p>
+
+      <div class="pwd-gate-user">
+        <div class="pwd-gate-user-icon" id="pwdGateIcon">A</div>
+        <div class="pwd-gate-user-text" id="pwdGateEmail">admin@...</div>
+      </div>
+
+      <div class="pwd-gate-field" id="pwdGateField">
+        <i class="fas fa-lock"></i>
+        <input type="password" id="pwdGateInput" placeholder="Mot de passe console" autocomplete="off">
+        <button type="button" class="pwd-gate-toggle" id="pwdGateToggle" aria-label="Afficher">
+          <i class="fas fa-eye"></i>
+        </button>
+      </div>
+
+      <div class="pwd-gate-error" id="pwdGateError">
+        <i class="fas fa-exclamation-circle"></i>
+        <span id="pwdGateErrorText">Mot de passe incorrect</span>
+      </div>
+
+      <button type="button" class="pwd-gate-btn" id="pwdGateBtn">
+        <span class="pwd-gate-btn-text">Déverrouiller</span>
+        <span class="spinner"></span>
+      </button>
+    </div>
+  </div>
+
   <!-- MODAL USER -->
   <div class="modal-back" id="userModal">
     <div class="modal">
@@ -1388,6 +1602,102 @@
     return state.userData?.role === 'admin';
   }
 
+    // ================================================================
+  // 🔐 MOT DE PASSE CONSOLE
+  // ================================================================
+  const CONSOLE_PASSWORD = 'arvexa2026';
+  const GATE_KEY = 'arvexa_admin_gate';
+  const GATE_DURATION = 24 * 60 * 60 * 1000; // 24 heures
+
+  function isGateValid() {
+    try {
+      const raw = sessionStorage.getItem(GATE_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      if (!data.expiresAt || data.expiresAt < Date.now()) {
+        sessionStorage.removeItem(GATE_KEY);
+        return false;
+      }
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function openGate(user) {
+    $('bootScreen').style.display = 'none';
+    $('adminApp').style.display = 'block';
+    $('sessionEmail').textContent = user.email;
+
+    // Afficher la modale
+    const gate = $('pwdGate');
+    gate.classList.add('show');
+
+    $('pwdGateIcon').textContent = (user.email || 'A').charAt(0).toUpperCase();
+    $('pwdGateEmail').textContent = user.email || '';
+
+    const input = $('pwdGateInput');
+    const btn = $('pwdGateBtn');
+    const field = $('pwdGateField');
+    const toggle = $('pwdGateToggle');
+    const error = $('pwdGateError');
+    const errorText = $('pwdGateErrorText');
+
+    input.value = '';
+    error.classList.remove('show');
+    field.classList.remove('error');
+    btn.classList.remove('loading');
+    btn.disabled = false;
+
+    setTimeout(() => input.focus(), 200);
+
+    toggle.onclick = () => {
+      const isPwd = input.type === 'password';
+      input.type = isPwd ? 'text' : 'password';
+      toggle.querySelector('i').className = isPwd ? 'fas fa-eye-slash' : 'fas fa-eye';
+    };
+
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); btn.click(); }
+    };
+
+    btn.onclick = () => {
+      const pwd = input.value;
+      if (!pwd) {
+        errorText.textContent = 'Entre un mot de passe';
+        error.classList.add('show');
+        return;
+      }
+
+      btn.classList.add('loading');
+      btn.disabled = true;
+      error.classList.remove('show');
+
+      setTimeout(() => {
+        if (pwd === CONSOLE_PASSWORD) {
+          try {
+            sessionStorage.setItem(GATE_KEY, JSON.stringify({
+              expiresAt: Date.now() + GATE_DURATION
+            }));
+          } catch (e) {}
+
+          gate.classList.remove('show');
+          init();
+        } else {
+          errorText.textContent = 'Mot de passe incorrect';
+          error.classList.add('show');
+          field.classList.add('error');
+          setTimeout(() => field.classList.remove('error'), 600);
+          input.value = '';
+          input.focus();
+          btn.classList.remove('loading');
+          btn.disabled = false;
+        }
+      }, 300);
+    };
+  }
+
+  // ================================================================
+  // AUTH
+  // ================================================================
   onAuthStateChanged(auth, async (user) => {
     if (!user) { window.location.replace('login.html'); return; }
     state.user = user;
@@ -1402,11 +1712,17 @@
       return;
     }
 
-    $('bootScreen').style.display = 'none';
-    $('adminApp').style.display = 'block';
-    $('sessionEmail').textContent = user.email;
+    // ⚡ Si le gate est déjà validé → direct
+    if (isGateValid()) {
+      $('bootScreen').style.display = 'none';
+      $('adminApp').style.display = 'block';
+      $('sessionEmail').textContent = user.email;
+      init();
+      return;
+    }
 
-    init();
+    // ⚡ Sinon → demander mot de passe
+    openGate(user);
   });
 
   // ================================================================

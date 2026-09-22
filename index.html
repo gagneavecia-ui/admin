@@ -5,23 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
   <meta name="theme-color" content="#0A0A0A">
   <meta name="robots" content="noindex, nofollow">
-  <meta name="description" content="ARVEXA Admin — Console sécurisée">
   <title>ARVEXA Admin · Connexion</title>
 
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon-admin-192.png" type="image/png">
   <link rel="apple-touch-icon" href="icon-admin-192.png">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
   <script src="register-sw.js" defer></script>
 
   <style>
     :root {
       --accent: #B8860B;
       --accent-bright: #E0B84A;
+      --success: #2D7D5A;
       --success-light: #3AB67E;
       --danger: #E74C3C;
       --danger-light: #f87171;
@@ -30,7 +28,6 @@
       --text-muted: #5A5A4A;
       --border-soft: rgba(255, 255, 255, 0.06);
       --card-border: rgba(184, 134, 11, 0.15);
-      --radius: 18px;
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
@@ -57,24 +54,13 @@
       min-height: 100dvh;
     }
 
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      z-index: -1;
-      background-image:
-        linear-gradient(rgba(184,134,11,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(184,134,11,0.03) 1px, transparent 1px);
-      background-size: 40px 40px;
-      mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%);
-      -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%);
-      pointer-events: none;
+    .wrap {
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
     }
 
-    .login-wrap { width: 100%; max-width: 420px; }
-
-    .login-logo { text-align: center; margin-bottom: 28px; }
-    .login-logo-icon {
+    .logo {
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -86,513 +72,255 @@
       font-family: 'Playfair Display', serif;
       font-size: 28px;
       font-weight: 800;
-      margin-bottom: 16px;
-      box-shadow: 0 8px 32px rgba(184, 134, 11, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-      animation: logoFloat 3.5s ease-in-out infinite;
-      position: relative;
+      margin-bottom: 18px;
+      box-shadow: 0 8px 32px rgba(184, 134, 11, 0.3);
+      animation: float 3s ease-in-out infinite;
     }
-    .login-logo-icon::after {
-      content: '🛡️';
-      position: absolute;
-      bottom: -6px;
-      right: -6px;
-      font-size: 22px;
-      filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
-    }
-    @keyframes logoFloat {
-      0%, 100% { transform: translateY(0) rotate(-1deg); }
-      50% { transform: translateY(-6px) rotate(1deg); }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
     }
 
-    .login-title {
+    h1 {
       font-family: 'Playfair Display', serif;
-      font-size: 26px;
+      font-size: 24px;
       font-weight: 700;
-      color: var(--text-light);
+      margin-bottom: 8px;
       letter-spacing: -0.02em;
-      line-height: 1.15;
-      margin-bottom: 6px;
     }
-    .login-title em { color: var(--accent-bright); font-style: italic; }
-    .login-sub { font-size: 13px; color: var(--text-dim); line-height: 1.5; max-width: 340px; margin: 0 auto; }
+    h1 em { color: var(--accent-bright); font-style: italic; }
 
-    .login-card {
-      background: rgba(20, 20, 20, 0.85);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid var(--card-border);
-      border-radius: var(--radius);
-      padding: 26px 22px;
-      position: relative;
-      overflow: hidden;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-      animation: cardIn 0.5s cubic-bezier(0.25, 1, 0.5, 1);
-    }
-    @keyframes cardIn {
-      from { opacity: 0; transform: translateY(20px) scale(0.97); }
-      to { opacity: 1; transform: translateY(0) scale(1); }
-    }
-    .login-card::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 2px;
-      background: linear-gradient(90deg, var(--accent), var(--accent-bright), var(--accent));
-      background-size: 200% auto;
-      animation: shimmer 4s linear infinite;
-    }
-    @keyframes shimmer {
-      0% { background-position: 0% center; }
-      100% { background-position: 200% center; }
-    }
-
-    .field { margin-bottom: 16px; position: relative; }
-    .field-label {
-      display: block;
-      font-size: 11.5px;
-      font-weight: 600;
+    .sub {
       color: var(--text-dim);
-      margin-bottom: 7px;
-      letter-spacing: 0.3px;
-      text-transform: uppercase;
+      font-size: 13px;
+      margin-bottom: 28px;
+      line-height: 1.5;
     }
-    .field-input-wrap {
-      position: relative;
+
+    .status {
+      padding: 20px;
+      background: rgba(20, 20, 20, 0.85);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
       display: flex;
+      flex-direction: column;
       align-items: center;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border-soft);
-      border-radius: 12px;
-      transition: all 0.2s ease;
-      overflow: hidden;
+      gap: 14px;
     }
-    .field-input-wrap:focus-within {
-      border-color: rgba(184, 134, 11, 0.4);
-      background: rgba(184, 134, 11, 0.03);
-      box-shadow: 0 0 0 4px rgba(184, 134, 11, 0.08);
-    }
-    .field-input-wrap.error {
-      border-color: rgba(231, 76, 60, 0.5);
-      background: rgba(231, 76, 60, 0.03);
-      animation: shake 0.4s ease;
-    }
-    @keyframes shake {
-      0%, 100% { transform: translateX(0); }
-      25% { transform: translateX(-6px); }
-      75% { transform: translateX(6px); }
-    }
-    .field-input-wrap .icon { padding: 0 4px 0 14px; color: var(--text-muted); font-size: 14px; flex-shrink: 0; }
-    .field-input-wrap:focus-within .icon { color: var(--accent-bright); }
-    .field-input-wrap input {
-      flex: 1;
-      min-width: 0;
-      padding: 13px 14px 13px 10px;
-      background: transparent;
-      border: none;
-      outline: none;
-      color: var(--text-light);
-      font-size: 15px;
-      font-family: inherit;
-      letter-spacing: 0.5px;
-    }
-    .field-input-wrap input::placeholder { color: var(--text-muted); }
-    .toggle-pwd {
-      position: absolute;
-      right: 10px;
-      top: 50%;
-      transform: translateY(-50%);
+
+    .spinner {
       width: 32px;
       height: 32px;
-      border-radius: 8px;
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-    }
-    .toggle-pwd:hover { color: var(--accent-bright); background: rgba(184, 134, 11, 0.08); }
-
-    .error-msg {
-      display: none;
-      font-size: 12px;
-      color: var(--danger-light);
-      margin-top: 8px;
-      padding-left: 4px;
-      align-items: center;
-      gap: 6px;
-    }
-    .error-msg.show { display: flex; }
-
-    .btn-login {
-      width: 100%;
-      padding: 14px 20px;
-      border: none;
-      border-radius: 12px;
-      background: linear-gradient(135deg, var(--accent-bright), var(--accent));
-      color: #0A0A0A;
-      font-family: inherit;
-      font-size: 14.5px;
-      font-weight: 700;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      transition: all 0.25s cubic-bezier(0.25, 1, 0.5, 1);
-      box-shadow: 0 4px 20px rgba(184, 134, 11, 0.2);
-      min-height: 50px;
-      margin-top: 4px;
-      position: relative;
-      overflow: hidden;
-    }
-    .btn-login:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(184, 134, 11, 0.35); }
-    .btn-login:active { transform: scale(0.98); }
-    .btn-login:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-login .spinner {
-      display: none;
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(10, 10, 10, 0.3);
-      border-top-color: #0A0A0A;
+      border: 3px solid rgba(184, 134, 11, 0.15);
+      border-top-color: var(--accent-bright);
       border-radius: 50%;
-      animation: spin 0.7s linear infinite;
+      animation: spin 0.8s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .btn-login.loading .spinner { display: block; }
-    .btn-login.loading .btn-text, .btn-login.loading .btn-icon { display: none; }
 
-    .remember-wrap { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; cursor: pointer; user-select: none; }
-    .remember-wrap input[type="checkbox"] {
-      appearance: none;
-      -webkit-appearance: none;
-      width: 18px;
-      height: 18px;
-      min-width: 18px;
-      border: 2px solid rgba(255, 255, 255, 0.15);
-      border-radius: 5px;
-      background: transparent;
-      cursor: pointer;
-      position: relative;
+    .status p {
+      font-size: 13px;
+      color: var(--text-dim);
     }
-    .remember-wrap input[type="checkbox"]:checked {
-      background: linear-gradient(135deg, var(--accent-bright), var(--accent));
-      border-color: var(--accent);
-    }
-    .remember-wrap input[type="checkbox"]:checked::after {
-      content: '';
-      position: absolute;
-      left: 4px; top: 1px;
-      width: 6px; height: 10px;
-      border: solid #0A0A0A;
-      border-width: 0 2px 2px 0;
-      transform: rotate(45deg);
-    }
-    .remember-wrap label { font-size: 12.5px; color: var(--text-dim); cursor: pointer; }
 
-    .security-row {
-      display: flex;
+    .btn {
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 14px;
-      margin-top: 18px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border-soft);
-      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: 12px;
+      border: none;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.25s ease;
+      min-height: 46px;
+      margin-top: 4px;
     }
-    .security-item { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-muted); font-weight: 500; }
-    .security-item i { color: var(--success-light); font-size: 10px; }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-bright), var(--accent));
+      color: #0A0A0A;
+      box-shadow: 0 4px 20px rgba(184, 134, 11, 0.2);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 28px rgba(184, 134, 11, 0.35);
+    }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-dim);
+      border: 1px solid var(--border-soft);
+    }
+    .btn-secondary:hover {
+      color: var(--text-light);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
 
-    .login-footer { text-align: center; margin-top: 20px; font-size: 11px; color: var(--text-muted); line-height: 1.6; }
-    .login-footer a { color: var(--text-dim); text-decoration: none; }
-    .login-footer a:hover { color: var(--accent-bright); }
+    .error-box {
+      display: none;
+      padding: 12px 16px;
+      border-radius: 10px;
+      background: rgba(231, 76, 60, 0.08);
+      border: 1px solid rgba(231, 76, 60, 0.2);
+      color: var(--danger-light);
+      font-size: 12.5px;
+      line-height: 1.5;
+      text-align: left;
+      width: 100%;
+    }
+    .error-box.show { display: flex; align-items: flex-start; gap: 8px; }
+    .error-box i { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
 
-    .toast-container {
-      position: fixed;
-      top: calc(var(--safe-top) + 16px);
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 9999;
-      width: calc(100% - 32px);
-      max-width: 380px;
+    .actions-row {
       display: flex;
       flex-direction: column;
       gap: 8px;
-      pointer-events: none;
-    }
-    .toast {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 12px 16px;
-      border-radius: 10px;
-      background: rgba(20, 22, 20, 0.97);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--border-soft);
-      color: var(--text-light);
-      font-size: 12.5px;
-      font-weight: 500;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
-      animation: toastIn 0.3s cubic-bezier(0.25, 1, 0.5, 1);
-      pointer-events: auto;
-    }
-    .toast.success { border-color: rgba(58, 182, 126, 0.5); }
-    .toast.error { border-color: rgba(231, 76, 60, 0.5); }
-    .toast i { font-size: 14px; flex-shrink: 0; }
-    .toast.success i { color: var(--success-light); }
-    .toast.error i { color: var(--danger-light); }
-    @keyframes toastIn {
-      from { opacity: 0; transform: translateY(-14px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    @media (max-width: 480px) {
-      .login-card { padding: 22px 18px; border-radius: 16px; }
-      .login-title { font-size: 22px; }
-      .login-logo-icon { width: 58px; height: 58px; font-size: 24px; }
-      .login-logo-icon::after { font-size: 18px; }
+      width: 100%;
+      margin-top: 8px;
     }
   </style>
 </head>
 <body>
 
-  <div class="login-wrap">
-    <div class="login-logo">
-      <div class="login-logo-icon">A</div>
-      <h1 class="login-title">ARVEXA <em>Admin</em></h1>
-      <p class="login-sub">Console sécurisée — Accès réservé aux administrateurs</p>
+  <div class="wrap">
+    <div class="logo">A</div>
+    <h1>ARVEXA <em>Admin</em></h1>
+    <p class="sub">Vérification de la session en cours...</p>
+
+    <div class="status" id="statusBox">
+      <div class="spinner"></div>
+      <p id="statusText">Chargement...</p>
     </div>
 
-    <div class="login-card">
-      <form id="loginForm" novalidate>
-        <div class="field">
-          <label class="field-label" for="passwordInput">Mot de passe d'accès</label>
-          <div class="field-input-wrap" id="passwordWrap">
-            <span class="icon"><i class="fas fa-lock"></i></span>
-            <input type="password" id="passwordInput" placeholder="••••••••••••" autocomplete="current-password" required minlength="4" autofocus>
-            <button type="button" class="toggle-pwd" id="togglePwd" aria-label="Afficher">
-              <i class="fas fa-eye"></i>
-            </button>
-          </div>
-          <div class="error-msg" id="errorMsg">
-            <i class="fas fa-exclamation-circle"></i>
-            <span id="errorText">Mot de passe incorrect</span>
-          </div>
-        </div>
-
-        <label class="remember-wrap">
-          <input type="checkbox" id="rememberMe">
-          <label for="rememberMe">Rester connecté 30 jours</label>
-        </label>
-
-        <button type="submit" class="btn-login" id="loginBtn">
-          <span class="btn-icon"><i class="fas fa-shield-halved"></i></span>
-          <span class="btn-text">Accéder à la console</span>
-          <span class="spinner"></span>
-        </button>
-      </form>
-
-      <div class="security-row">
-        <span class="security-item"><i class="fas fa-lock"></i> Chiffré</span>
-        <span class="security-item"><i class="fas fa-shield"></i> Session sécurisée</span>
-        <span class="security-item"><i class="fas fa-clock"></i> Auto-déconnexion</span>
-      </div>
+    <div class="error-box" id="errorBox">
+      <i class="fas fa-exclamation-circle"></i>
+      <span id="errorText"></span>
     </div>
 
-    <div class="login-footer">
-      <p>© 2026 ARVEXA School · Console Admin</p>
+    <div class="actions-row" id="actionsRow" style="display:none">
+      <a href="admin.html" class="btn btn-primary">
+        <i class="fas fa-shield-halved"></i> Accéder à la console
+      </a>
+      <button type="button" class="btn btn-secondary" id="logoutBtn">
+        <i class="fas fa-sign-out-alt"></i> Utiliser un autre compte
+      </button>
     </div>
   </div>
 
-  <div class="toast-container" id="toastContainer"></div>
+  <script type="importmap">
+  {
+    "imports": {
+      "firebase/app": "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js",
+      "firebase/auth": "https://www.gstatic.com/firebasejs/12.12.1/firebase-auth.js",
+      "firebase/firestore": "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js"
+    }
+  }
+  </script>
 
-  <script>
+  <script type="module">
   // ================================================================
-  // LOGIN ADMIN
+  // LOGIN ADMIN — Vérifie Firebase puis redirige
   // ================================================================
 
-  // ⚠️ MOT DE PASSE PAR DÉFAUT : "arvexa2026"
-  // Pour changer : https://emn178.github.io/online-tools/sha1.html
-  const ADMIN_PASSWORD = 'ARPRO14';
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
+  import {
+    getAuth,
+    onAuthStateChanged,
+    setPersistence,
+    browserLocalPersistence,
+    signOut
+  } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-auth.js";
+  import {
+    getFirestore,
+    doc,
+    getDoc
+  } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
 
-  const SESSION_KEY = 'arvexa_admin_session';
-  const REMEMBER_KEY = 'arvexa_admin_remember';
-  const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000; // 30 jours
-  const SESSION_DURATION_SHORT = 12 * 60 * 60 * 1000; // 12 heures
+  const ADMIN_EMAILS = ['gagneavecia@gmail.com'];
 
-  const $ = (id) => document.getElementById(id);
-  const form = $('loginForm');
-  const passwordInput = $('passwordInput');
-  const loginBtn = $('loginBtn');
-  const togglePwd = $('togglePwd');
-  const passwordWrap = $('passwordWrap');
-  const errorMsg = $('errorMsg');
-  const errorText = $('errorText');
-  const rememberMe = $('rememberMe');
-  const toastContainer = $('toastContainer');
+  const app = initializeApp({
+    apiKey: "AIzaSyDHscOXw3rLuhV6z1Cny-bdYCumqpnG7QE",
+    authDomain: "arvexa-fbf10.firebaseapp.com",
+    projectId: "arvexa-fbf10",
+    storageBucket: "arvexa-fbf10.firebasestorage.app",
+    messagingSenderId: "920108330053",
+    appId: "1:920108330053:web:f532d71cbc2c824bc7472c"
+  });
 
-  function showToast(msg, type = 'info') {
-    const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', info: 'fa-info-circle' };
-    const t = document.createElement('div');
-    t.className = `toast ${type}`;
-    t.innerHTML = `<i class="fas ${icons[type]}"></i><span>${msg}</span>`;
-    toastContainer.appendChild(t);
-    setTimeout(() => {
-      t.style.opacity = '0';
-      t.style.transform = 'translateY(-10px)';
-      setTimeout(() => t.remove(), 300);
-    }, 3000);
-  }
-
-  // SHA-1 minimal
-  function sha1(str) {
-    function rotl(n, s) { return (n << s) | (n >>> (32 - s)); }
-    function toHex(n) {
-      let s = '';
-      for (let i = 7; i >= 0; i--) s += ((n >>> (i * 4)) & 0x0f).toString(16);
-      return s;
-    }
-    const utf8 = unescape(encodeURIComponent(str));
-    const len = utf8.length;
-    const words = [];
-    for (let i = 0; i < len * 8; i += 8) {
-      words[i >> 5] |= (utf8.charCodeAt(i / 8) & 0xff) << (24 - i % 32);
-    }
-    words[len * 8 >> 5] |= 0x80 << (24 - len * 8 % 32);
-    words[((len * 8 + 64 >> 9) << 4) + 15] = len * 8;
-    let H = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
-    for (let i = 0; i < words.length; i += 16) {
-      const w = words.slice(i, i + 16);
-      const oldH = H.slice();
-      for (let j = 0; j < 80; j++) {
-        let f, k;
-        if (j < 20) { f = (H[1] & H[2]) | (~H[1] & H[3]); k = 0x5A827999; }
-        else if (j < 40) { f = H[1] ^ H[2] ^ H[3]; k = 0x6ED9EBA1; }
-        else if (j < 60) { f = (H[1] & H[2]) | (H[1] & H[3]) | (H[2] & H[3]); k = 0x8F1BBCDC; }
-        else { f = H[1] ^ H[2] ^ H[3]; k = 0xCA62C1D6; }
-        const temp = (rotl(H[0], 5) + f + H[4] + k + (w[j] || (w[j] = rotl(w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16], 1)))) | 0;
-        H[4] = H[3]; H[3] = H[2]; H[2] = rotl(H[1], 30); H[1] = H[0]; H[0] = temp;
-      }
-      for (let k = 0; k < 5; k++) H[k] = (H[k] + oldH[k]) | 0;
-    }
-    return H.map(toHex).join('');
-  }
-
-  function saveSession(remember) {
-    const duration = remember ? SESSION_DURATION : SESSION_DURATION_SHORT;
-    const data = {
-      token: Math.random().toString(36).substring(2) + Date.now().toString(36),
-      expiresAt: Date.now() + duration,
-      createdAt: Date.now()
-    };
-    try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(data));
-      if (remember) localStorage.setItem(REMEMBER_KEY, '1');
-      else localStorage.removeItem(REMEMBER_KEY);
-    } catch (e) {}
-  }
-
-  function isSessionValid() {
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (!raw) return false;
-      const data = JSON.parse(raw);
-      if (!data.expiresAt || data.expiresAt < Date.now()) {
-        localStorage.removeItem(SESSION_KEY);
-        return false;
-      }
-      return true;
-    } catch (e) { return false; }
-  }
-
-  if (isSessionValid()) {
-    window.location.replace('admin.html');
-  }
+  const auth = getAuth(app);
+  const db = getFirestore(app);
 
   try {
-    if (localStorage.getItem(REMEMBER_KEY) === '1') rememberMe.checked = true;
+    await setPersistence(auth, browserLocalPersistence);
   } catch (e) {}
 
-  togglePwd.addEventListener('click', () => {
-    const isPwd = passwordInput.type === 'password';
-    passwordInput.type = isPwd ? 'text' : 'password';
-    togglePwd.querySelector('i').className = isPwd ? 'fas fa-eye-slash' : 'fas fa-eye';
-  });
-
-  let attempts = 0;
-  const MAX_ATTEMPTS = 5;
-  const LOCK_DURATION = 60 * 1000;
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (loginBtn.disabled) return;
-
-    try {
-      const lockUntil = parseInt(localStorage.getItem('arvexa_admin_lock') || '0', 10);
-      if (lockUntil > Date.now()) {
-        const secs = Math.ceil((lockUntil - Date.now()) / 1000);
-        showError(`Trop de tentatives. Réessaie dans ${secs}s.`);
-        return;
-      }
-    } catch (e) {}
-
-    const pwd = passwordInput.value;
-    if (!pwd || pwd.length < 4) {
-      showError('Mot de passe trop court');
-      return;
-    }
-
-    loginBtn.classList.add('loading');
-    loginBtn.disabled = true;
-    clearError();
-
-    await new Promise(r => setTimeout(r, 400));
-
-    const hash = sha1(pwd);
-
-    if (hash === ADMIN_PASSWORD_HASH) {
-      saveSession(rememberMe.checked);
-      try {
-        localStorage.removeItem('arvexa_admin_attempts');
-        localStorage.removeItem('arvexa_admin_lock');
-      } catch (e) {}
-      showToast('✅ Accès autorisé', 'success');
-      setTimeout(() => window.location.replace('admin.html'), 600);
-      return;
-    }
-
-    attempts++;
-    try { localStorage.setItem('arvexa_admin_attempts', attempts); } catch (e) {}
-
-    if (attempts >= MAX_ATTEMPTS) {
-      try { localStorage.setItem('arvexa_admin_lock', String(Date.now() + LOCK_DURATION)); } catch (e) {}
-      showError('Trop de tentatives. Bloqué pour 60s.');
-      showToast('🚨 Trop de tentatives', 'error');
-      passwordWrap.classList.add('error');
-      setTimeout(() => passwordWrap.classList.remove('error'), 600);
-    } else {
-      showError(`Mot de passe incorrect (${MAX_ATTEMPTS - attempts} essai(s) restant(s))`);
-      passwordWrap.classList.add('error');
-      setTimeout(() => passwordWrap.classList.remove('error'), 600);
-      passwordInput.value = '';
-      passwordInput.focus();
-    }
-
-    loginBtn.classList.remove('loading');
-    loginBtn.disabled = false;
-  });
+  const $ = (id) => document.getElementById(id);
+  const statusText = $('statusText');
+  const statusBox = $('statusBox');
+  const errorBox = $('errorBox');
+  const errorText = $('errorText');
+  const actionsRow = $('actionsRow');
+  const logoutBtn = $('logoutBtn');
 
   function showError(msg) {
+    statusBox.style.display = 'none';
     errorText.textContent = msg;
-    errorMsg.classList.add('show');
-  }
-  function clearError() {
-    errorMsg.classList.remove('show');
+    errorBox.classList.add('show');
   }
 
-  setTimeout(() => passwordInput.focus(), 300);
+  function showSuccess() {
+    statusBox.style.display = 'none';
+    errorBox.classList.remove('show');
+    actionsRow.style.display = 'flex';
+  }
+
+  // Vérifier après 5 secondes max
+  const timeout = setTimeout(() => {
+    showError('Délai de connexion dépassé. Vérifie ta connexion internet.');
+  }, 5000);
+
+  onAuthStateChanged(auth, async (user) => {
+    clearTimeout(timeout);
+
+    if (!user) {
+      statusText.textContent = 'Aucune session trouvée.';
+      showError('Tu n\'es pas connecté. Va sur le site principal pour te connecter, puis reviens ici.');
+      return;
+    }
+
+    // Vérifier si admin
+    statusText.textContent = 'Vérification des autorisations...';
+
+    let isAdmin = ADMIN_EMAILS.includes(user.email);
+
+    if (!isAdmin) {
+      try {
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        if (snap.exists() && snap.data().role === 'admin') {
+          isAdmin = true;
+        }
+      } catch (e) {}
+    }
+
+    if (!isAdmin) {
+      showError('Accès refusé. Ce compte n\'est pas administrateur.');
+      return;
+    }
+
+    // ✅ Tout est bon
+    statusText.textContent = 'Connecté en tant qu\'admin';
+    showSuccess();
+  });
+
+  logoutBtn.addEventListener('click', async () => {
+    if (!confirm('Se déconnecter ?')) return;
+    try { await signOut(auth); } catch (e) {}
+    // Rediriger vers le site principal ou recharger
+    window.location.reload();
+  });
 
   console.log('🔐 ARVEXA Admin — Login');
   </script>
