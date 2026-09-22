@@ -1,8 +1,7 @@
 // ================================================================
 // API ADMIN — ARVEXA School
-// Hébergé côté admin-89.vercel.app
-// Vérification stricte du rôle admin côté serveur
-// Actions : notifications (Firestore + FCM), gestion utilisateurs
+// Hébergé sur admin-89.vercel.app
+// Auth Firebase + Firestore + FCM
 // ================================================================
 
 const WINDOW_MS = 60 * 1000;
@@ -12,42 +11,63 @@ const requestLog = new Map();
 const CLICK_ACTION_URL = 'https://arvexaschool.vercel.app/notifications.html';
 const ICON_URL = 'https://arvexaschool.vercel.app/icon.png';
 
-let adminServices;
+let adminServices = null;
 
+// ────────────────────────────────────────────────────────────────
+// INIT FIREBASE ADMIN (une seule fois, robuste, avec diagnostic)
+// ────────────────────────────────────────────────────────────────
 function getAdminServices() {
   if (adminServices) return adminServices;
 
   const credentials = process.env.FIREBASE_ADMIN_CREDENTIALS;
 
-  if (!credentials) {
-    console.error('[ADMIN DEBUG] FIREBASE_ADMIN_CREDENTIALS is missing or empty.');
-    throw new Error('firebase_admin_not_configured');
+  if (!credentials || !credentials.trim()) {
+    const err = new Error('firebase_admin_not_configured');
+    err.details = 'FIREBASE_ADMIN_CREDENTIALS is missing or empty in Vercel env vars.';
+    throw err;
   }
-
-  console.error('[ADMIN DEBUG] Credentials length:', credentials.length);
-  console.error('[ADMIN DEBUG] Starts with:', credentials.slice(0, 40));
-  console.error('[ADMIN DEBUG] Ends with:', credentials.slice(-40));
 
   let serviceAccount;
   try {
     serviceAccount = JSON.parse(credentials);
   } catch (parseError) {
-    console.error('[ADMIN DEBUG] JSON.parse failed:', parseError.message);
-    throw new Error('firebase_admin_invalid_json');
+    const err = new Error('firebase_admin_invalid_json');
+    err.details = 'FIREBASE_ADMIN_CREDENTIALS is not valid JSON: ' + parseError.message;
+    throw err;
   }
 
-  console.error('[ADMIN DEBUG] service_account project_id:', serviceAccount.project_id);
-  console.error('[ADMIN DEBUG] service_account client_email:', serviceAccount.client_email);
-  console.error('[ADMIN DEBUG] private_key length:', (serviceAccount.private_key || '').length);
+  if (!serviceAccount.project_id) {
+    const err = new Error('firebase_admin_missing_project');
+    err.details = 'FIREBASE_ADMIN_CREDENTIALS has no project_id field.';
+    throw err;
+  }
+
+  if (serviceAccount.project_id !== 'arvexa-fbf10') {
+    const err = new Error('firebase_admin_wrong_project');
+    err.details =
+      'FIREBASE_ADMIN_CREDENTIALS project is "' +
+      serviceAccount.project_id +
+      '" but expected "arvexa-fbf10".';
+    throw err;
+  }
+
+  if (!serviceAccount.private_key || serviceAccount.private_key.length < 100) {
+    const err = new Error('firebase_admin_invalid_key');
+    err.details = 'FIREBASE_ADMIN_CREDENTIALS private_key is invalid or too short.';
+    throw err;
+  }
 
   const admin = require('firebase-admin');
 
   if (!admin.apps.length) {
     try {
-      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
     } catch (initError) {
-      console.error('[ADMIN DEBUG] initializeApp failed:', initError.message);
-      throw initError;
+      const err = new Error('firebase_admin_init_failed');
+      err.details = 'admin.initializeApp failed: ' + initError.message;
+      throw err;
     }
   }
 
@@ -55,11 +75,17 @@ function getAdminServices() {
     auth: admin.auth(),
     db: admin.firestore(),
     FieldValue: admin.firestore.FieldValue,
-    messaging: admin.messaging()
+    messaging: admin.messaging(),
+    projectId: serviceAccount.project_id
   };
+
+  console.log('[ADMIN] Firebase initialized for project:', serviceAccount.project_id);
   return adminServices;
 }
 
+// ────────────────────────────────────────────────────────────────
+// HELPERS
+// ────────────────────────────────────────────────────────────────
 function clientIp(request) {
   return String(
     request.headers['x-forwarded-for'] || request.socket?.remoteAddress || 'unknown'
@@ -70,29 +96,28 @@ function clientIp(request) {
 
 function rateLimited(ip) {
   const now = Date.now();
-  const recent = (requestLog.get(ip) || []).filter((time) => now - time < WINDOW_MS);
+  const recent = (requestLog.get(ip) || []).filter((t) => now - t < WINDOW_MS);
   recent.push(now);
   requestLog.set(ip, recent);
   return recent.length > MAX_REQUESTS_PER_WINDOW;
 }
 
-function jsonError(response, status, error) {
-  return response.status(status).json({ success: false, error });
+function jsonError(response, status, error, extra = {}) {
+  return response.status(status).json({ success: false, error, ...extra });
 }
 
 async function verifyFirebaseToken(request) {
   const authorization = request.headers.authorization || '';
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   if (!match) {
-    console.error('[AUTH DEBUG] No Bearer token in Authorization header.');
+    console.error('[AUTH] No Bearer token provided');
     return null;
   }
   try {
     const { auth } = getAdminServices();
     return await auth.verifyIdToken(match[1]);
   } catch (error) {
-    console.error('[AUTH DEBUG] verifyIdToken failed:', error.message);
-    console.error('[AUTH DEBUG] error.code:', error.code || 'no-code');
+    console.error('[AUTH] verifyIdToken failed:', error.message, '| code:', error.code || 'no-code');
     return null;
   }
 }
@@ -100,12 +125,19 @@ async function verifyFirebaseToken(request) {
 async function requireAdmin(request) {
   const user = await verifyFirebaseToken(request);
   if (!user) throw { status: 401, message: 'Connexion requise.' };
+
   const { db } = getAdminServices();
   const userDoc = await db.collection('users').doc(user.uid).get();
   const data = userDoc.data();
+
   if (!data || data.role !== 'admin') {
-    throw { status: 403, message: 'Accès refusé. Réservé aux administrateurs.' };
+    throw {
+      status: 403,
+      message: 'Accès refusé. Réservé aux administrateurs.',
+      details: `role check failed for ${user.email} (${user.uid})`
+    };
   }
+
   return { uid: user.uid, email: user.email, data };
 }
 
@@ -142,12 +174,13 @@ function serializeUser(doc) {
     role: data.role || 'student',
     totalStudyTime: data.totalStudyTime || 0,
     createdAt: data.createdAt || null,
-    lastLogin: data.lastLogin || null
+    lastLogin: data.lastLogin || null,
+    hasFcmToken: Boolean(data.fcmToken)
   };
 }
 
 // ────────────────────────────────────────────────────────────────
-// FCM — Envoi push
+// FCM — ENVOI PUSH
 // ────────────────────────────────────────────────────────────────
 async function sendPushToUsers(tokens, { title, body, type }) {
   if (!Array.isArray(tokens) || tokens.length === 0) {
@@ -210,7 +243,6 @@ async function sendPushToUsers(tokens, { title, body, type }) {
 // ────────────────────────────────────────────────────────────────
 // ACTIONS
 // ────────────────────────────────────────────────────────────────
-
 async function checkAdmin() {
   return { ok: true };
 }
@@ -333,7 +365,7 @@ async function rejectSubscription({ uid }) {
 
   await db.collection('users').doc(uid).collection('notifications').add({
     title: '❌ Demande refusée',
-    body: "Ta demande d'abonnement n'a pas pu être validée. Contacte le support pour plus d'informations.",
+    body: "Ta demande d'abonnement n'a pas pu être validée. Contacte le support.",
     type: 'error',
     read: false,
     createdAt: FieldValue.serverTimestamp()
@@ -356,7 +388,7 @@ async function revokePremium({ uid }) {
 
   await db.collection('users').doc(uid).collection('notifications').add({
     title: '⚠️ Abonnement révoqué',
-    body: "Ton accès Premium a été suspendu. Contacte le support si tu penses qu'il s'agit d'une erreur.",
+    body: "Ton accès Premium a été suspendu.",
     type: 'warning',
     read: false,
     createdAt: FieldValue.serverTimestamp()
@@ -403,9 +435,6 @@ async function deleteUser({ uid }) {
   return { ok: true };
 }
 
-// ────────────────────────────────────────────────────────────────
-// NOTIFICATIONS — Firestore + FCM
-// ────────────────────────────────────────────────────────────────
 async function sendNotification({ target, email, title, message, type }) {
   const { db, FieldValue } = getAdminServices();
 
@@ -413,8 +442,8 @@ async function sendNotification({ target, email, title, message, type }) {
   if (title.length > 120) throw { status: 400, message: 'Titre trop long.' };
   if (message.length > 1000) throw { status: 400, message: 'Message trop long.' };
 
-  // 1) Résoudre les cibles
   let usersSnap;
+
   if (target === 'specific') {
     if (!email) throw { status: 400, message: 'Email requis.' };
     usersSnap = await db
@@ -423,26 +452,18 @@ async function sendNotification({ target, email, title, message, type }) {
       .limit(1)
       .get();
     if (usersSnap.empty) throw { status: 404, message: 'Utilisateur introuvable.' };
-  } else if (target === 'premium') {
-    usersSnap = await db.collection('users').where('premium', '==', true).get();
   } else {
     usersSnap = await db.collection('users').get();
   }
 
-  // 2) Filtre côté serveur
   let docs = usersSnap.docs;
-  if (target === 'free') {
-    docs = docs.filter((doc) => !isPremiumActive(doc.data()));
-  }
-  if (target === 'premium') {
-    docs = docs.filter((doc) => isPremiumActive(doc.data()));
-  }
+  if (target === 'free') docs = docs.filter((d) => !isPremiumActive(d.data()));
+  if (target === 'premium') docs = docs.filter((d) => isPremiumActive(d.data()));
 
   if (docs.length === 0) {
     return { ok: true, count: 0, pushSent: 0, pushFailed: 0 };
   }
 
-  // 3) Écriture in-app (Firestore) + collecte des tokens
   const now = FieldValue.serverTimestamp();
   const tokens = [];
   let count = 0;
@@ -469,7 +490,6 @@ async function sendNotification({ target, email, title, message, type }) {
     await batch.commit();
   }
 
-  // 4) Envoi push FCM
   let pushSent = 0;
   let pushFailed = 0;
 
@@ -480,7 +500,6 @@ async function sendNotification({ target, email, title, message, type }) {
     pushSent = pushResult.successCount;
     pushFailed = pushResult.failureCount;
 
-    // 5) Nettoyage des tokens invalides
     if (pushResult.invalidTokens.length > 0) {
       const invalidSet = new Set(pushResult.invalidTokens);
       const cleanupBatch = db.batch();
@@ -505,7 +524,6 @@ async function sendNotification({ target, email, title, message, type }) {
     }
   }
 
-  // 6) Historique admin
   await db.collection('admin_notifications').add({
     title,
     message,
@@ -568,21 +586,35 @@ async function getStats() {
 // HANDLER
 // ────────────────────────────────────────────────────────────────
 module.exports = async function handler(request, response) {
+  // CORS basique (même domaine normalement, mais tolérant)
+  response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (request.method === 'OPTIONS') {
+    return response.status(204).end();
+  }
+
   if (request.method !== 'POST') {
     response.setHeader('Allow', 'POST');
     return jsonError(response, 405, 'Méthode non autorisée.');
   }
+
   if (rateLimited(clientIp(request))) {
     return jsonError(response, 429, 'Trop de demandes. Réessaie.');
   }
 
+  // Vérification admin
   let adminContext;
   try {
     adminContext = await requireAdmin(request);
   } catch (e) {
-    if (e.status) return jsonError(response, e.status, e.message);
-    console.error('Admin auth error:', e.message);
-    return jsonError(response, 503, 'Service temporairement indisponible.');
+    if (e.status) {
+      return jsonError(response, e.status, e.message, e.details ? { details: e.details } : {});
+    }
+    // Erreur de config Firebase → 503 avec détails
+    console.error('[ADMIN] Config error:', e.message, '|', e.details || '');
+    return jsonError(response, 503, e.message || 'Service temporairement indisponible.', {
+      details: e.details || 'unknown'
+    });
   }
 
   const body = request.body && typeof request.body === 'object' ? request.body : {};
@@ -609,6 +641,6 @@ module.exports = async function handler(request, response) {
   } catch (error) {
     console.error(`Admin action "${action}" failed:`, error.message);
     if (error.status) return jsonError(response, error.status, error.message);
-    return jsonError(response, 500, 'Erreur serveur.');
+    return jsonError(response, 500, 'Erreur serveur: ' + error.message);
   }
 };
