@@ -1453,7 +1453,8 @@
   } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
 
   const ADMIN_EMAILS = ['gagneavecia@gmail.com'];
-
+  const BACKEND_URL = ''; // ⚡ même domaine → fetch relatif
+    
   const firebaseConfig = {
     apiKey: "AIzaSyDHscOXw3rLuhV6z1Cny-bdYCumqpnG7QE",
     authDomain: "arvexa-fbf10.firebaseapp.com",
@@ -2580,61 +2581,80 @@
   // NOTIFICATIONS
   // ================================================================
   async function sendNotif() {
-    const target = $('notifTarget').value;
-    const type = $('notifType').value;
-    const title = ($('notifTitle').value || '').trim();
-    const body = ($('notifMessage').value || '').trim();
+  const target = $('notifTarget').value;
+  const type   = $('notifType').value;
+  const title  = ($('notifTitle').value || '').trim();
+  const body   = ($('notifMessage').value || '').trim();
+  const email  = ($('notifEmail')?.value || '').trim().toLowerCase();
 
-    if (!title || !body) { toast('Titre et message requis', 'error'); return; }
-
-    const btn = $('sendNotifBtn');
-    btn.disabled = true;
-    const orig = btn.innerHTML;
-    btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0"></div>';
-
-    try {
-      let targets = [];
-      if (target === 'all') targets = state.users;
-      else if (target === 'premium') targets = state.users.filter(isPremium);
-      else if (target === 'free') targets = state.users.filter(u => !isPremium(u));
-      else if (target === 'single') {
-        const email = ($('notifEmail').value || '').trim().toLowerCase();
-        if (!email) throw new Error('Email requis');
-        targets = state.users.filter(u => (u.email || '').toLowerCase() === email);
-        if (targets.length === 0) throw new Error('Utilisateur introuvable');
-      }
-
-      if (targets.length === 0) throw new Error('Aucun destinataire');
-
-      let count = 0;
-      for (let i = 0; i < targets.length; i += 400) {
-        const batch = writeBatch(db);
-        targets.slice(i, i + 400).forEach(u => {
-          const ref = doc(collection(db, 'users', u.id, 'notifications'));
-          batch.set(ref, {
-            title, body, type, read: false,
-            sentBy: state.user.email,
-            createdAt: serverTimestamp()
-          });
-          count++;
-        });
-        await batch.commit();
-      }
-
-      await logAction('Notification envoyée', target, { count, title });
-      toast(`${count} notif envoyée(s)`, 'success');
-      $('notifTitle').value = '';
-      $('notifMessage').value = '';
-      $('notifEmail').value = '';
-      loadNotifHistory();
-    } catch (e) {
-      toast('Erreur : ' + e.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = orig;
-    }
+  if (!title || !body) {
+    toast('Titre et message requis', 'error');
+    return;
+  }
+  if (target === 'single' && !email) {
+    toast('Email requis', 'error');
+    return;
   }
 
+  const btn = $('sendNotifBtn');
+  btn.disabled = true;
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;margin:0"></div>';
+
+  try {
+    const token = await state.user.getIdToken();
+
+    const response = await fetch(`${BACKEND_URL}/api/admin`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        action: 'sendNotification',
+        target,
+        email,
+        title,
+        message: body,
+        type
+      })
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok || !data?.ok) {
+      throw new Error(data?.error || 'Envoi échoué.');
+    }
+
+    const total      = data.count || 0;
+    const pushSent   = data.pushSent || 0;
+    const pushFailed = data.pushFailed || 0;
+
+    let msg = `${total} in-app`;
+    if (pushSent > 0)   msg += ` · ${pushSent} push ✓`;
+    if (pushFailed > 0) msg += ` · ${pushFailed} échec${pushFailed > 1 ? 's' : ''}`;
+
+    if (total === 0) {
+      toast('Aucun destinataire trouvé', 'info');
+    } else {
+      toast(msg, 'success');
+    }
+
+    // Vider le formulaire
+    $('notifTitle').value = '';
+    $('notifMessage').value = '';
+    $('notifEmail').value = '';
+
+    // Rafraîchir l'historique
+    loadNotifHistory();
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+  }
+    
   async function loadNotifHistory() {
     try {
       const snap = await getDocs(query(collection(db, 'adminLogs'), orderBy('timestamp', 'desc'), limit(20)));
