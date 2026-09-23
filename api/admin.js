@@ -330,11 +330,13 @@ async function approveSubscription({ uid }) {
   const data = userSnap.data();
   const plan = data.subscriptionPlan || 'monthly';
 
+  // Calculer la date de fin
   const now = new Date();
   const endDate = new Date(now);
   if (plan === 'annual') endDate.setFullYear(endDate.getFullYear() + 1);
   else endDate.setMonth(endDate.getMonth() + 1);
 
+  // Mettre à jour le profil
   await userRef.update({
     premium: true,
     isUnlocked: true,
@@ -345,15 +347,50 @@ async function approveSubscription({ uid }) {
     updatedAt: FieldValue.serverTimestamp()
   });
 
+  // Contenu de la notification
+  const notifTitle = '🎉 Premium activé !';
+  const notifBody = `Ton abonnement ${plan === 'annual' ? 'annuel' : 'mensuel'} a été activé. Tu as maintenant accès à tous les contenus.`;
+
+  // 1) Notif in-app (Firestore)
   await db.collection('users').doc(uid).collection('notifications').add({
-    title: '🎉 Premium activé !',
-    body: `Ton abonnement ${plan === 'annual' ? 'annuel' : 'mensuel'} a été activé. Tu as maintenant accès à tous les contenus.`,
+    title: notifTitle,
+    body: notifBody,
     type: 'success',
     read: false,
     createdAt: FieldValue.serverTimestamp()
   });
 
-  return { ok: true };
+  // 2) Notif push FCM (si l'utilisateur a un token)
+  let pushSent = 0;
+  let pushFailed = 0;
+
+  const fcmToken = data.fcmToken;
+  if (typeof fcmToken === 'string' && fcmToken.length > 20) {
+    try {
+      const pushResult = await sendPushToUsers([fcmToken], {
+        title: notifTitle,
+        body: notifBody,
+        type: 'success'
+      });
+
+      pushSent = pushResult.successCount;
+      pushFailed = pushResult.failureCount;
+
+      // Nettoyage si le token est invalide
+      if (pushResult.invalidTokens.length > 0) {
+        try {
+          await userRef.update({ fcmToken: FieldValue.delete() });
+        } catch (e) {
+          console.warn('Token cleanup failed:', e.message);
+        }
+      }
+    } catch (error) {
+      console.error('Push FCM failed for approval:', error.message);
+      pushFailed = 1;
+    }
+  }
+
+  return { ok: true, pushSent, pushFailed };
 }
 
 async function rejectSubscription({ uid }) {
