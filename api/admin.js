@@ -14,7 +14,7 @@ const ICON_URL = 'https://arvexaschool.vercel.app/icon.png';
 let adminServices = null;
 
 // ────────────────────────────────────────────────────────────────
-// INIT FIREBASE ADMIN (une seule fois, robuste, avec diagnostic)
+// INIT FIREBASE ADMIN
 // ────────────────────────────────────────────────────────────────
 function getAdminServices() {
   if (adminServices) return adminServices;
@@ -23,7 +23,7 @@ function getAdminServices() {
 
   if (!credentials || !credentials.trim()) {
     const err = new Error('firebase_admin_not_configured');
-    err.details = 'FIREBASE_ADMIN_CREDENTIALS is missing or empty in Vercel env vars.';
+    err.details = 'FIREBASE_ADMIN_CREDENTIALS is missing or empty.';
     throw err;
   }
 
@@ -32,28 +32,19 @@ function getAdminServices() {
     serviceAccount = JSON.parse(credentials);
   } catch (parseError) {
     const err = new Error('firebase_admin_invalid_json');
-    err.details = 'FIREBASE_ADMIN_CREDENTIALS is not valid JSON: ' + parseError.message;
+    err.details = 'Invalid JSON: ' + parseError.message;
     throw err;
   }
 
   if (!serviceAccount.project_id) {
     const err = new Error('firebase_admin_missing_project');
-    err.details = 'FIREBASE_ADMIN_CREDENTIALS has no project_id field.';
-    throw err;
-  }
-
-  if (serviceAccount.project_id !== 'arvexa-fbf10') {
-    const err = new Error('firebase_admin_wrong_project');
-    err.details =
-      'FIREBASE_ADMIN_CREDENTIALS project is "' +
-      serviceAccount.project_id +
-      '" but expected "arvexa-fbf10".';
+    err.details = 'No project_id in credentials.';
     throw err;
   }
 
   if (!serviceAccount.private_key || serviceAccount.private_key.length < 100) {
     const err = new Error('firebase_admin_invalid_key');
-    err.details = 'FIREBASE_ADMIN_CREDENTIALS private_key is invalid or too short.';
+    err.details = 'Invalid private_key.';
     throw err;
   }
 
@@ -66,7 +57,7 @@ function getAdminServices() {
       });
     } catch (initError) {
       const err = new Error('firebase_admin_init_failed');
-      err.details = 'admin.initializeApp failed: ' + initError.message;
+      err.details = initError.message;
       throw err;
     }
   }
@@ -79,7 +70,7 @@ function getAdminServices() {
     projectId: serviceAccount.project_id
   };
 
-  console.log('[ADMIN] Firebase initialized for project:', serviceAccount.project_id);
+  console.log('[ADMIN] Firebase init OK:', serviceAccount.project_id);
   return adminServices;
 }
 
@@ -89,9 +80,7 @@ function getAdminServices() {
 function clientIp(request) {
   return String(
     request.headers['x-forwarded-for'] || request.socket?.remoteAddress || 'unknown'
-  )
-    .split(',')[0]
-    .trim();
+  ).split(',')[0].trim();
 }
 
 function rateLimited(ip) {
@@ -110,7 +99,7 @@ async function verifyFirebaseToken(request) {
   const authorization = request.headers.authorization || '';
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   if (!match) {
-    console.error('[AUTH] No Bearer token provided');
+    console.error('[AUTH] No Bearer token');
     return null;
   }
   try {
@@ -134,7 +123,7 @@ async function requireAdmin(request) {
     throw {
       status: 403,
       message: 'Accès refusé. Réservé aux administrateurs.',
-      details: `role check failed for ${user.email} (${user.uid})`
+      details: `role check failed for ${user.email}`
     };
   }
 
@@ -201,8 +190,6 @@ async function sendPushToUsers(tokens, { title, body, type }) {
     try {
       response = await messaging.sendEachForMulticast({
         tokens: chunk,
-        // ⚡ PAS de bloc "notification" → FCM n'affiche rien automatiquement
-        // C'est firebase-messaging-sw.js qui affiche manuellement
         data: {
           title: title,
           body: body,
@@ -210,12 +197,7 @@ async function sendPushToUsers(tokens, { title, body, type }) {
           type: type || 'info'
         },
         webpush: {
-          fcmOptions: { link: CLICK_ACTION_URL },
-          // ⚡ headers utiles pour iOS
-          headers: {
-            Urgency: 'high',
-            TTL: '86400'
-          }
+          fcmOptions: { link: CLICK_ACTION_URL }
         }
       });
     } catch (error) {
@@ -271,13 +253,7 @@ async function getDashboard() {
   }).length;
 
   return {
-    stats: {
-      totalUsers,
-      premiumUsers,
-      pendingSubscriptions,
-      blockedUsers,
-      newThisWeek
-    },
+    stats: { totalUsers, premiumUsers, pendingSubscriptions, blockedUsers, newThisWeek },
     pendingRequests: pendingRequests.slice(0, 10)
   };
 }
@@ -330,13 +306,11 @@ async function approveSubscription({ uid }) {
   const data = userSnap.data();
   const plan = data.subscriptionPlan || 'monthly';
 
-  // Calculer la date de fin
   const now = new Date();
   const endDate = new Date(now);
   if (plan === 'annual') endDate.setFullYear(endDate.getFullYear() + 1);
   else endDate.setMonth(endDate.getMonth() + 1);
 
-  // Mettre à jour le profil
   await userRef.update({
     premium: true,
     isUnlocked: true,
@@ -347,11 +321,10 @@ async function approveSubscription({ uid }) {
     updatedAt: FieldValue.serverTimestamp()
   });
 
-  // Contenu de la notification
   const notifTitle = '🎉 Premium activé !';
   const notifBody = `Ton abonnement ${plan === 'annual' ? 'annuel' : 'mensuel'} a été activé. Tu as maintenant accès à tous les contenus.`;
 
-  // 1) Notif in-app (Firestore)
+  // 1) Notif in-app
   await db.collection('users').doc(uid).collection('notifications').add({
     title: notifTitle,
     body: notifBody,
@@ -360,42 +333,22 @@ async function approveSubscription({ uid }) {
     createdAt: FieldValue.serverTimestamp()
   });
 
-  // 2) Notif push FCM (si l'utilisateur a un token)
+  // 2) Push FCM
   let pushSent = 0;
   let pushFailed = 0;
 
- // ⚡ Récupérer TOUS les tokens
-let userTokens = Array.isArray(data.fcmTokens) ? data.fcmTokens : [];
-if (userTokens.length === 0 && typeof data.fcmToken === 'string' && data.fcmToken.length > 20) {
-  userTokens = [data.fcmToken];
-}
-
-if (userTokens.length > 0) {
-  const pushResult = await sendPushToUsers(userTokens, {
-    title: notifTitle,
-    body: notifBody,
-    type: 'success'
-  });
-
-  pushSent = pushResult.successCount;
-  pushFailed = pushResult.failureCount;
-
-  // Nettoyage : retirer les tokens invalides du tableau
-  if (pushResult.invalidTokens.length > 0) {
-    const invalidSet = new Set(pushResult.invalidTokens);
-    const cleanedTokens = userTokens.filter((t) => !invalidSet.has(t));
+  const fcmToken = data.fcmToken;
+  if (typeof fcmToken === 'string' && fcmToken.length > 20) {
     try {
-      await userRef.update({ fcmTokens: cleanedTokens });
-    } catch (e) {
-      console.warn('Token cleanup failed:', e.message);
-    }
-  }
-}
-  
+      const pushResult = await sendPushToUsers([fcmToken], {
+        title: notifTitle,
+        body: notifBody,
+        type: 'success'
+      });
+
       pushSent = pushResult.successCount;
       pushFailed = pushResult.failureCount;
 
-      // Nettoyage si le token est invalide
       if (pushResult.invalidTokens.length > 0) {
         try {
           await userRef.update({ fcmToken: FieldValue.delete() });
@@ -404,7 +357,7 @@ if (userTokens.length > 0) {
         }
       }
     } catch (error) {
-      console.error('Push FCM failed for approval:', error.message);
+      console.error('Push FCM failed:', error.message);
       pushFailed = 1;
     }
   }
@@ -495,6 +448,9 @@ async function deleteUser({ uid }) {
   return { ok: true };
 }
 
+// ────────────────────────────────────────────────────────────────
+// NOTIFICATIONS — Firestore + FCM
+// ────────────────────────────────────────────────────────────────
 async function sendNotification({ target, email, title, message, type }) {
   const { db, FieldValue } = getAdminServices();
 
@@ -502,8 +458,8 @@ async function sendNotification({ target, email, title, message, type }) {
   if (title.length > 120) throw { status: 400, message: 'Titre trop long.' };
   if (message.length > 1000) throw { status: 400, message: 'Message trop long.' };
 
+  // 1) Résoudre les cibles
   let usersSnap;
-
   if (target === 'specific') {
     if (!email) throw { status: 400, message: 'Email requis.' };
     usersSnap = await db
@@ -517,13 +473,19 @@ async function sendNotification({ target, email, title, message, type }) {
   }
 
   let docs = usersSnap.docs;
-  if (target === 'free') docs = docs.filter((d) => !isPremiumActive(d.data()));
-  if (target === 'premium') docs = docs.filter((d) => isPremiumActive(d.data()));
+
+  if (target === 'free') {
+    docs = docs.filter((d) => !isPremiumActive(d.data()));
+  }
+  if (target === 'premium') {
+    docs = docs.filter((d) => isPremiumActive(d.data()));
+  }
 
   if (docs.length === 0) {
     return { ok: true, count: 0, pushSent: 0, pushFailed: 0 };
   }
 
+  // 2) Écriture in-app + collecte des tokens
   const now = FieldValue.serverTimestamp();
   const tokens = [];
   let count = 0;
@@ -540,28 +502,17 @@ async function sendNotification({ target, email, title, message, type }) {
         createdAt: now
       });
 
-    const userData = doc.data();
-
-// ⚡ Nouveau système : tableau fcmTokens
-let userTokens = Array.isArray(userData.fcmTokens) ? userData.fcmTokens : [];
-
-// Fallback ancien système
-if (userTokens.length === 0 && typeof userData.fcmToken === 'string' && userData.fcmToken.length > 20) {
-  userTokens = [userData.fcmToken];
-}
-
-// Ajouter chaque token de cet utilisateur
-userTokens.forEach((t) => {
-  if (typeof t === 'string' && t.length > 20) {
-    tokens.push({ token: t, uid: doc.id });
-  }
-});
+      const token = doc.data().fcmToken;
+      if (typeof token === 'string' && token.length > 20) {
+        tokens.push({ token, uid: doc.id });
+      }
 
       count++;
     });
     await batch.commit();
   }
 
+  // 3) Envoi FCM
   let pushSent = 0;
   let pushFailed = 0;
 
@@ -572,45 +523,32 @@ userTokens.forEach((t) => {
     pushSent = pushResult.successCount;
     pushFailed = pushResult.failureCount;
 
-  if (pushResult.invalidTokens.length > 0) {
-  const invalidSet = new Set(pushResult.invalidTokens);
+    // 4) Nettoyage tokens invalides
+    if (pushResult.invalidTokens.length > 0) {
+      const invalidSet = new Set(pushResult.invalidTokens);
+      const cleanupBatch = db.batch();
+      let hasCleanup = false;
 
-  // Grouper par utilisateur
-  const tokensByUser = new Map();
-  tokens.forEach(({ token, uid }) => {
-    if (!tokensByUser.has(uid)) tokensByUser.set(uid, new Set());
-    tokensByUser.get(uid).add(token);
-  });
+      tokens.forEach(({ token, uid }) => {
+        if (invalidSet.has(token)) {
+          cleanupBatch.update(db.collection('users').doc(uid), {
+            fcmToken: FieldValue.delete()
+          });
+          hasCleanup = true;
+        }
+      });
 
-  const cleanupBatch = db.batch();
-  let hasCleanup = false;
-
-  for (const [uid, userTokenSet] of tokensByUser.entries()) {
-    const userRef = db.collection('users').doc(uid);
-    const userSnap = await userRef.get();
-    if (!userSnap.exists) continue;
-
-    const userData = userSnap.data();
-    let userTokens = Array.isArray(userData.fcmTokens) ? userData.fcmTokens : [];
-
-    // Filtrer les tokens invalides
-    const cleaned = userTokens.filter((t) => !invalidSet.has(t));
-
-    if (cleaned.length !== userTokens.length) {
-      cleanupBatch.update(userRef, { fcmTokens: cleaned });
-      hasCleanup = true;
+      if (hasCleanup) {
+        try {
+          await cleanupBatch.commit();
+        } catch (e) {
+          console.warn('Cleanup failed:', e.message);
+        }
+      }
     }
   }
 
-  if (hasCleanup) {
-    try { await cleanupBatch.commit(); } catch (e) {
-      console.warn('Token cleanup failed:', e.message);
-    }
-  }
-}
-    }
-  }
-
+  // 5) Historique admin
   await db.collection('admin_notifications').add({
     title,
     message,
@@ -634,17 +572,13 @@ async function getNotificationHistory() {
     .orderBy('createdAt', 'desc')
     .limit(30)
     .get();
-  return {
-    history: snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-  };
+  return { history: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
 }
 
 async function getAvis() {
   const { db } = getAdminServices();
   const snap = await db.collection('avis').orderBy('createdAt', 'desc').limit(100).get();
-  return {
-    avis: snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-  };
+  return { avis: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
 }
 
 async function getStats() {
@@ -664,18 +598,16 @@ async function getStats() {
     return created && created.getTime() > oneWeekAgo;
   }).length;
 
-  return {
-    stats: { totalUsers, premiumUsers, newThisWeek, blockedUsers }
-  };
+  return { stats: { totalUsers, premiumUsers, newThisWeek, blockedUsers } };
 }
 
 // ────────────────────────────────────────────────────────────────
 // HANDLER
 // ────────────────────────────────────────────────────────────────
 module.exports = async function handler(request, response) {
-  // CORS basique (même domaine normalement, mais tolérant)
   response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
   if (request.method === 'OPTIONS') {
     return response.status(204).end();
   }
@@ -689,7 +621,6 @@ module.exports = async function handler(request, response) {
     return jsonError(response, 429, 'Trop de demandes. Réessaie.');
   }
 
-  // Vérification admin
   let adminContext;
   try {
     adminContext = await requireAdmin(request);
@@ -697,7 +628,6 @@ module.exports = async function handler(request, response) {
     if (e.status) {
       return jsonError(response, e.status, e.message, e.details ? { details: e.details } : {});
     }
-    // Erreur de config Firebase → 503 avec détails
     console.error('[ADMIN] Config error:', e.message, '|', e.details || '');
     return jsonError(response, 503, e.message || 'Service temporairement indisponible.', {
       details: e.details || 'unknown'
@@ -727,6 +657,7 @@ module.exports = async function handler(request, response) {
     }
   } catch (error) {
     console.error(`Admin action "${action}" failed:`, error.message);
+    console.error('Stack:', error.stack);
     if (error.status) return jsonError(response, error.status, error.message);
     return jsonError(response, 500, 'Erreur serveur: ' + error.message);
   }
