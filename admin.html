@@ -2353,39 +2353,44 @@
   // ================================================================
   // ACTIONS
   // ================================================================
-  window.__activate = async function(uid) {
-    if (!confirm('Activer Premium ?')) return;
-    try {
-      const user = state.users.find(u => u.id === uid);
-      const plan = user?.subscriptionPlan || 'monthly';
-      const days = plan === 'annual' ? 365 : 30;
-      const start = new Date();
-      const end = new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
+window.__activate = async function(uid) {
+  if (!confirm('Activer Premium ?')) return;
 
-      await updateDoc(doc(db, 'users', uid), {
-        premium: true, isUnlocked: true, hasDeposited: true,
-        subscriptionStatus: 'active',
-        subscriptionStartDate: start,
-        subscriptionEndDate: end,
-        subscriptionActivatedAt: serverTimestamp(),
-        subscriptionActivatedBy: state.user.email,
-        updatedAt: serverTimestamp()
-      });
+  try {
+    const token = await state.user.getIdToken();
 
-      await addDoc(collection(db, 'users', uid, 'notifications'), {
-        title: 'Premium activé',
-        body: `Ton abonnement ${plan === 'annual' ? 'annuel' : 'mensuel'} est actif.`,
-        type: 'success', read: false, createdAt: serverTimestamp()
-      });
+    const response = await fetch('/api/admin', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({
+        action: 'approveSubscription',
+        uid: uid
+      })
+    });
 
-      await logAction('Activation Premium', user?.email || uid);
-      toast('Premium activé', 'success');
-      await reloadAll();
-    } catch (e) {
-      toast('Erreur : ' + e.message, 'error');
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok || !data?.ok) {
+      throw new Error(data?.error || 'Activation échouée.');
     }
-  };
 
+    const pushSent = data.pushSent || 0;
+    const pushFailed = data.pushFailed || 0;
+
+    let msg = 'Premium activé';
+    if (pushSent > 0) msg += ' · push envoyé ✓';
+    if (pushFailed > 0) msg += ' · push échoué';
+
+    toast(msg, 'success');
+    await reloadAll();
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
+};
+    
   window.__reject = async function(uid) {
     if (!confirm('Refuser ?')) return;
     try {
