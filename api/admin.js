@@ -364,15 +364,34 @@ async function approveSubscription({ uid }) {
   let pushSent = 0;
   let pushFailed = 0;
 
-  const fcmToken = data.fcmToken;
-  if (typeof fcmToken === 'string' && fcmToken.length > 20) {
-    try {
-      const pushResult = await sendPushToUsers([fcmToken], {
-        title: notifTitle,
-        body: notifBody,
-        type: 'success'
-      });
+ // ⚡ Récupérer TOUS les tokens
+let userTokens = Array.isArray(data.fcmTokens) ? data.fcmTokens : [];
+if (userTokens.length === 0 && typeof data.fcmToken === 'string' && data.fcmToken.length > 20) {
+  userTokens = [data.fcmToken];
+}
 
+if (userTokens.length > 0) {
+  const pushResult = await sendPushToUsers(userTokens, {
+    title: notifTitle,
+    body: notifBody,
+    type: 'success'
+  });
+
+  pushSent = pushResult.successCount;
+  pushFailed = pushResult.failureCount;
+
+  // Nettoyage : retirer les tokens invalides du tableau
+  if (pushResult.invalidTokens.length > 0) {
+    const invalidSet = new Set(pushResult.invalidTokens);
+    const cleanedTokens = userTokens.filter((t) => !invalidSet.has(t));
+    try {
+      await userRef.update({ fcmTokens: cleanedTokens });
+    } catch (e) {
+      console.warn('Token cleanup failed:', e.message);
+    }
+  }
+}
+  
       pushSent = pushResult.successCount;
       pushFailed = pushResult.failureCount;
 
@@ -521,10 +540,22 @@ async function sendNotification({ target, email, title, message, type }) {
         createdAt: now
       });
 
-      const token = doc.data().fcmToken;
-      if (typeof token === 'string' && token.length > 20) {
-        tokens.push({ token, uid: doc.id });
-      }
+    const userData = doc.data();
+
+// ⚡ Nouveau système : tableau fcmTokens
+let userTokens = Array.isArray(userData.fcmTokens) ? userData.fcmTokens : [];
+
+// Fallback ancien système
+if (userTokens.length === 0 && typeof userData.fcmToken === 'string' && userData.fcmToken.length > 20) {
+  userTokens = [userData.fcmToken];
+}
+
+// Ajouter chaque token de cet utilisateur
+userTokens.forEach((t) => {
+  if (typeof t === 'string' && t.length > 20) {
+    tokens.push({ token: t, uid: doc.id });
+  }
+});
 
       count++;
     });
@@ -541,27 +572,42 @@ async function sendNotification({ target, email, title, message, type }) {
     pushSent = pushResult.successCount;
     pushFailed = pushResult.failureCount;
 
-    if (pushResult.invalidTokens.length > 0) {
-      const invalidSet = new Set(pushResult.invalidTokens);
-      const cleanupBatch = db.batch();
-      let hasCleanup = false;
+  if (pushResult.invalidTokens.length > 0) {
+  const invalidSet = new Set(pushResult.invalidTokens);
 
-      tokens.forEach(({ token, uid }) => {
-        if (invalidSet.has(token)) {
-          cleanupBatch.update(db.collection('users').doc(uid), {
-            fcmToken: FieldValue.delete()
-          });
-          hasCleanup = true;
-        }
-      });
+  // Grouper par utilisateur
+  const tokensByUser = new Map();
+  tokens.forEach(({ token, uid }) => {
+    if (!tokensByUser.has(uid)) tokensByUser.set(uid, new Set());
+    tokensByUser.get(uid).add(token);
+  });
 
-      if (hasCleanup) {
-        try {
-          await cleanupBatch.commit();
-        } catch (e) {
-          console.warn('Token cleanup failed:', e.message);
-        }
-      }
+  const cleanupBatch = db.batch();
+  let hasCleanup = false;
+
+  for (const [uid, userTokenSet] of tokensByUser.entries()) {
+    const userRef = db.collection('users').doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) continue;
+
+    const userData = userSnap.data();
+    let userTokens = Array.isArray(userData.fcmTokens) ? userData.fcmTokens : [];
+
+    // Filtrer les tokens invalides
+    const cleaned = userTokens.filter((t) => !invalidSet.has(t));
+
+    if (cleaned.length !== userTokens.length) {
+      cleanupBatch.update(userRef, { fcmTokens: cleaned });
+      hasCleanup = true;
+    }
+  }
+
+  if (hasCleanup) {
+    try { await cleanupBatch.commit(); } catch (e) {
+      console.warn('Token cleanup failed:', e.message);
+    }
+  }
+}
     }
   }
 
