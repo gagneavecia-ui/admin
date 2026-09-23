@@ -201,16 +201,20 @@ async function sendPushToUsers(tokens, { title, body, type }) {
     try {
       response = await messaging.sendEachForMulticast({
         tokens: chunk,
-        notification: { title, body },
+        // ⚡ PAS de bloc "notification" → FCM n'affiche rien automatiquement
+        // C'est firebase-messaging-sw.js qui affiche manuellement
         data: {
+          title: title,
+          body: body,
           click_action: 'notifications.html',
           type: type || 'info'
         },
         webpush: {
           fcmOptions: { link: CLICK_ACTION_URL },
-          notification: {
-            icon: ICON_URL,
-            badge: ICON_URL
+          // ⚡ headers utiles pour iOS
+          headers: {
+            Urgency: 'high',
+            TTL: '86400'
           }
         }
       });
