@@ -1,15 +1,26 @@
 // ================================================================
-// API ADMIN — ARVEXA School v2
+// API ADMIN — ARVEXA School v3
 // Hébergé sur admin-89.vercel.app
-// Auth Firebase + Firestore + FCM
+// Auth Firebase + Firestore + FCM + CORS multi-origines
 // ================================================================
 
 const WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 60;
 const requestLog = new Map();
 
-const CLICK_ACTION_URL = 'https://arvexaschool.vercel.app/notifications.html';
+const CLICK_ACTION_URL = 'https://admin-89.vercel.app/admin.html';
 const ICON_URL = 'https://arvexaschool.vercel.app/icon.png';
+
+// ⚡ Origines autorisées (public + admin)
+const ALLOWED_ORIGINS = [
+  'https://arvexaschool.vercel.app',
+  'https://admin-89.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:5000'
+];
+
+// ⚡ Admins en dur (fallback si role Firestore manquant)
+const ADMIN_EMAILS = ['gagneavecia@gmail.com'];
 
 let adminServices = null;
 
@@ -89,6 +100,17 @@ function jsonError(response, status, error, extra = {}) {
   return response.status(status).json({ success: false, error, ...extra });
 }
 
+function applyCors(request, response) {
+  const origin = request.headers.origin || '';
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    response.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  response.setHeader('Vary', 'Origin');
+  response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  response.setHeader('Access-Control-Max-Age', '86400');
+}
+
 async function verifyFirebaseToken(request) {
   const authorization = request.headers.authorization || '';
   const match = authorization.match(/^Bearer\s+(.+)$/i);
@@ -110,7 +132,10 @@ async function requireAdmin(request) {
   const userDoc = await db.collection('users').doc(user.uid).get();
   const data = userDoc.data();
 
-  if (!data || data.role !== 'admin') {
+  const isAdminByRole = data && data.role === 'admin';
+  const isAdminByEmail = ADMIN_EMAILS.includes(user.email);
+
+  if (!isAdminByRole && !isAdminByEmail) {
     throw {
       status: 403,
       message: 'Accès refusé. Réservé aux administrateurs.',
@@ -118,7 +143,7 @@ async function requireAdmin(request) {
     };
   }
 
-  return { uid: user.uid, email: user.email, data };
+  return { uid: user.uid, email: user.email, data: data || {} };
 }
 
 function isPremiumActive(u) {
@@ -130,11 +155,22 @@ function isPremiumActive(u) {
   return !end || end.getTime() > Date.now();
 }
 
+// ⚡ Convertit un Timestamp Firestore en ISO string
+function toISO(v) {
+  if (!v) return null;
+  if (typeof v.toDate === 'function') return v.toDate().toISOString();
+  if (v._seconds !== undefined) return new Date(v._seconds * 1000).toISOString();
+  if (v.seconds !== undefined) return new Date(v.seconds * 1000).toISOString();
+  if (typeof v === 'string') return v;
+  if (v instanceof Date) return v.toISOString();
+  return null;
+}
+
 function serializeUser(doc) {
   const data = doc.data() || {};
   return {
     uid: doc.id,
-    id: doc.id, // ⚡ alias pour le front
+    id: doc.id,
     firstName: data.firstName || '',
     lastName: data.lastName || '',
     email: data.email || '',
@@ -153,23 +189,37 @@ function serializeUser(doc) {
     subscriptionFullName: data.subscriptionFullName || null,
     subscriptionWhatsapp: data.subscriptionWhatsapp || null,
     subscriptionPaymentMethod: data.subscriptionPaymentMethod || null,
-    subscriptionRequestDate: data.subscriptionRequestDate || null,
-    subscriptionStartDate: data.subscriptionStartDate || null,
-    subscriptionEndDate: data.subscriptionEndDate || null,
+    subscriptionRequestDate: toISO(data.subscriptionRequestDate),
+    subscriptionStartDate: toISO(data.subscriptionStartDate),
+    subscriptionEndDate: toISO(data.subscriptionEndDate),
+    subscriptionActivatedAt: toISO(data.subscriptionActivatedAt),
+    subscriptionRejectedAt: toISO(data.subscriptionRejectedAt),
+    createdAt: toISO(data.createdAt),
+    updatedAt: toISO(data.updatedAt),
+    lastLogin: toISO(data.lastLogin),
     accountStatus: data.accountStatus || 'active',
     role: data.role || 'student',
     totalStudyTime: data.totalStudyTime || 0,
-    createdAt: data.createdAt || null,
-    updatedAt: data.updatedAt || null,
-    lastLogin: data.lastLogin || null,
     hasFcmToken: Boolean(data.fcmToken || (Array.isArray(data.fcmTokens) && data.fcmTokens.length > 0))
   };
+}
+
+// ⚡ Récupère tous les tokens d'un user
+function getUserTokens(data) {
+  const tokens = new Set();
+  if (Array.isArray(data?.fcmTokens)) {
+    data.fcmTokens.forEach((t) => { if (typeof t === 'string' && t.length > 20) tokens.add(t); });
+  }
+  if (typeof data?.fcmToken === 'string' && data.fcmToken.length > 20) {
+    tokens.add(data.fcmToken);
+  }
+  return Array.from(tokens);
 }
 
 // ────────────────────────────────────────────────────────────────
 // FCM — ENVOI PUSH
 // ────────────────────────────────────────────────────────────────
-async function sendPushToUsers(tokens, { title, body, type }) {
+async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
   if (!Array.isArray(tokens) || tokens.length === 0) {
     return { successCount: 0, failureCount: 0, invalidTokens: [] };
   }
@@ -190,10 +240,20 @@ async function sendPushToUsers(tokens, { title, body, type }) {
           title: title,
           body: body,
           click_action: 'notifications.html',
-          type: type || 'info'
+          type: type || 'info',
+          ...data
         },
         webpush: {
-          fcmOptions: { link: CLICK_ACTION_URL }
+          fcmOptions: { link: CLICK_ACTION_URL },
+          notification: {
+            title: title,
+            body: body,
+            icon: ICON_URL,
+            badge: ICON_URL,
+            vibrate: [200, 100, 200],
+            requireInteraction: false,
+            tag: 'arvexa-' + Date.now()
+          }
         }
       });
     } catch (error) {
@@ -222,20 +282,41 @@ async function sendPushToUsers(tokens, { title, body, type }) {
   return { successCount, failureCount, invalidTokens };
 }
 
-// ⚡ NOUVEAU : récupère tous les tokens d'un user (array + fallback singulier)
-function getUserTokens(data) {
-  const tokens = new Set();
-  if (Array.isArray(data?.fcmTokens)) {
-    data.fcmTokens.forEach((t) => { if (typeof t === 'string' && t.length > 20) tokens.add(t); });
+// ⚡ NOTIFIE TOUS LES ADMINS (push)
+async function notifyAdmins({ title, body, type = 'info', data = {} }) {
+  const { db } = getAdminServices();
+  const usersSnap = await db.collection('users').get();
+
+  const adminDocs = usersSnap.docs.filter((d) => {
+    const u = d.data();
+    return u.role === 'admin' || ADMIN_EMAILS.includes(u.email);
+  });
+
+  const tokens = [];
+  adminDocs.forEach((docSnap) => {
+    const u = docSnap.data();
+    getUserTokens(u).forEach((t) => tokens.push(t));
+  });
+
+  const uniqueTokens = [...new Set(tokens)];
+  if (uniqueTokens.length === 0) {
+    console.log('[PUSH] Aucun token admin trouvé');
+    return { sent: 0, failed: 0 };
   }
-  if (typeof data?.fcmToken === 'string' && data.fcmToken.length > 20) {
-    tokens.add(data.fcmToken);
-  }
-  return Array.from(tokens);
+
+  const result = await sendPushToUsers(uniqueTokens, {
+    title,
+    body,
+    type,
+    data
+  });
+
+  console.log(`[PUSH] Admins notifiés : ${result.successCount}/${uniqueTokens.length}`);
+  return { sent: result.successCount, failed: result.failureCount, invalidTokens: result.invalidTokens };
 }
 
 // ────────────────────────────────────────────────────────────────
-// LOG ACTION (centralisé côté serveur)
+// LOG ACTION
 // ────────────────────────────────────────────────────────────────
 async function logAction({ action, target = '', details = {}, adminEmail, adminUid }) {
   const { db, FieldValue } = getAdminServices();
@@ -270,9 +351,8 @@ async function getDashboard() {
 
   const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const newThisWeek = users.filter((u) => {
-    const created = u.createdAt?.toDate?.() ||
-      (u.createdAt?.seconds ? new Date(u.createdAt.seconds * 1000) : null);
-    return created && created.getTime() > oneWeekAgo;
+    const created = u.createdAt ? new Date(u.createdAt).getTime() : null;
+    return created && created > oneWeekAgo;
   }).length;
 
   return {
@@ -292,12 +372,32 @@ async function getStats() {
 
   const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const newThisWeek = users.filter((u) => {
-    const created = u.createdAt?.toDate?.() ||
-      (u.createdAt?.seconds ? new Date(u.createdAt.seconds * 1000) : null);
-    return created && created.getTime() > oneWeekAgo;
+    const created = u.createdAt ? new Date(u.createdAt).getTime() : null;
+    return created && created > oneWeekAgo;
   }).length;
 
   return { stats: { totalUsers, premiumUsers, newThisWeek, blockedUsers } };
+}
+
+// ────────────────────────────────────────────────────────────────
+// ⚡ ACTION PUBLIQUE — Notifier les admins d'une demande
+// ────────────────────────────────────────────────────────────────
+async function notifyNewSubscriptionRequest({ userUid, userName, plan, planLabel, price, requestId }) {
+  const title = '💳 Nouvelle demande Premium';
+  const body = `${userName || 'Un élève'} — ${planLabel || (plan === 'annual' ? 'Annuel' : 'Mensuel')} · ${Number(price || 0).toLocaleString('fr-FR')} FCFA`;
+
+  const result = await notifyAdmins({
+    title,
+    body,
+    type: 'warning',
+    data: {
+      kind: 'subscription_request',
+      userUid: userUid || '',
+      requestId: requestId || ''
+    }
+  });
+
+  return { ok: true, ...result };
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -324,8 +424,8 @@ async function getUsers({ page = 0, pageSize = 100, sort = 'recent' }) {
     users.sort((a, b) => (a.email || '').localeCompare(b.email || ''));
   } else {
     users.sort((a, b) => {
-      const da = a.createdAt?.toDate?.()?.getTime() || a.createdAt?.seconds * 1000 || 0;
-      const db_ = b.createdAt?.toDate?.()?.getTime() || b.createdAt?.seconds * 1000 || 0;
+      const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const db_ = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       return db_ - da;
     });
   }
@@ -363,7 +463,6 @@ async function approveSubscription({ uid }, adminCtx) {
   const notifTitle = '🎉 Premium activé !';
   const notifBody = `Ton abonnement ${plan === 'annual' ? 'annuel' : 'mensuel'} a été activé. Tu as maintenant accès à tous les contenus.`;
 
-  // Notif in-app
   await db.collection('users').doc(uid).collection('notifications').add({
     title: notifTitle,
     body: notifBody,
@@ -372,7 +471,6 @@ async function approveSubscription({ uid }, adminCtx) {
     createdAt: FieldValue.serverTimestamp()
   });
 
-  // Push FCM
   let pushSent = 0;
   let pushFailed = 0;
   const tokens = getUserTokens(data);
@@ -400,7 +498,6 @@ async function approveSubscription({ uid }, adminCtx) {
     }
   }
 
-  // Log admin
   await logAction({
     action: 'Activation Premium',
     target: data.email || uid,
@@ -674,8 +771,7 @@ async function sendNotification({ target, email, title, message, type }, adminCt
         createdAt: now
       });
 
-      const userTokens = getUserTokens(doc.data());
-      userTokens.forEach((t) => tokens.push({ token: t, uid: doc.id }));
+      getUserTokens(doc.data()).forEach((t) => tokens.push({ token: t, uid: doc.id }));
       count++;
     });
     await batch.commit();
@@ -711,6 +807,7 @@ async function sendNotification({ target, email, title, message, type }, adminCt
   }
 
   await db.collection('admin_notifications').add({
+    kind: 'admin_broadcast',
     title,
     message,
     type: type || 'info',
@@ -740,11 +837,16 @@ async function getNotificationHistory() {
     .orderBy('createdAt', 'desc')
     .limit(30)
     .get();
-  return { history: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+  return {
+    history: snap.docs.map((d) => {
+      const data = d.data();
+      return { id: d.id, ...data, createdAt: toISO(data.createdAt) };
+    })
+  };
 }
 
 // ────────────────────────────────────────────────────────────────
-// ACTIONS — AVIS
+// ACTIONS — AVIS / LOGS / PROMOS / BANNED / MAINTENANCE
 // ────────────────────────────────────────────────────────────────
 async function getAvis() {
   const { db } = getAdminServices();
@@ -752,24 +854,33 @@ async function getAvis() {
     .orderBy('createdAt', 'desc')
     .limit(100)
     .get();
-  return { avis: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+  return {
+    avis: snap.docs.map((d) => {
+      const data = d.data();
+      return { id: d.id, ...data, createdAt: toISO(data.createdAt) };
+    })
+  };
 }
 
-// ────────────────────────────────────────────────────────────────
-// ⚡ NOUVEAU — LOGS
-// ────────────────────────────────────────────────────────────────
 async function getLogs({ limit: lim = 60 } = {}) {
   const { db } = getAdminServices();
   const snap = await db.collection('adminLogs')
     .orderBy('timestamp', 'desc')
     .limit(Math.min(lim, 100))
     .get();
-  return { logs: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+  return {
+    logs: snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        timestamp: toISO(data.timestamp),
+        createdAt: toISO(data.createdAt)
+      };
+    })
+  };
 }
 
-// ────────────────────────────────────────────────────────────────
-// ⚡ NOUVEAU — PROMOS
-// ────────────────────────────────────────────────────────────────
 async function getPromos() {
   const { db } = getAdminServices();
   const snap = await db.collection('promoCodes').get();
@@ -825,13 +936,15 @@ async function deletePromo({ id }, adminCtx) {
   return { ok: true };
 }
 
-// ────────────────────────────────────────────────────────────────
-// ⚡ NOUVEAU — BANNED (modération groupe)
-// ────────────────────────────────────────────────────────────────
 async function getBanned() {
   const { db } = getAdminServices();
   const snap = await db.collection('groups').doc('general').collection('banned').get();
-  return { banned: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+  return {
+    banned: snap.docs.map((d) => {
+      const data = d.data();
+      return { id: d.id, ...data, bannedAt: toISO(data.bannedAt) };
+    })
+  };
 }
 
 async function unbanUser({ uid }, adminCtx) {
@@ -848,9 +961,6 @@ async function unbanUser({ uid }, adminCtx) {
   return { ok: true };
 }
 
-// ────────────────────────────────────────────────────────────────
-// ⚡ NOUVEAU — MAINTENANCE
-// ────────────────────────────────────────────────────────────────
 async function toggleMaintenance({ enabled }, adminCtx) {
   const { db, FieldValue } = getAdminServices();
   await db.collection('config').doc('maintenance').set({
@@ -872,9 +982,8 @@ async function toggleMaintenance({ enabled }, adminCtx) {
 // HANDLER PRINCIPAL
 // ────────────────────────────────────────────────────────────────
 module.exports = async function handler(request, response) {
-  // CORS preflight
-  response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // ⚡ CORS
+  applyCors(request, response);
 
   if (request.method === 'OPTIONS') return response.status(204).end();
 
@@ -887,6 +996,22 @@ module.exports = async function handler(request, response) {
     return jsonError(response, 429, 'Trop de demandes. Réessaie.');
   }
 
+  const body = request.body && typeof request.body === 'object' ? request.body : {};
+  const action = body.action;
+
+  // ⚡ ACTION PUBLIQUE — notifier les admins (n'importe quel user connecté)
+  if (action === 'notifyNewSubscriptionRequest') {
+    const user = await verifyFirebaseToken(request);
+    if (!user) return jsonError(response, 401, 'Connexion requise.');
+    try {
+      return response.status(200).json(await notifyNewSubscriptionRequest(body));
+    } catch (e) {
+      console.error('notifyNewSubscriptionRequest error:', e.message);
+      return jsonError(response, 500, e.message || 'Erreur serveur.');
+    }
+  }
+
+  // 🔒 Toutes les autres actions → admin requis
   let adminContext;
   try {
     adminContext = await requireAdmin(request);
@@ -900,17 +1025,12 @@ module.exports = async function handler(request, response) {
     });
   }
 
-  const body = request.body && typeof request.body === 'object' ? request.body : {};
-  const action = body.action;
-
   try {
     switch (action) {
-      // Dashboard & stats
       case 'checkAdmin': return response.status(200).json(await checkAdmin());
       case 'getDashboard': return response.status(200).json(await getDashboard());
       case 'getStats': return response.status(200).json(await getStats());
 
-      // Utilisateurs
       case 'getSubscriptions': return response.status(200).json(await getSubscriptions());
       case 'getUsers': return response.status(200).json(await getUsers(body));
       case 'approveSubscription': return response.status(200).json(await approveSubscription(body, adminContext));
@@ -922,14 +1042,10 @@ module.exports = async function handler(request, response) {
       case 'demoteUser': return response.status(200).json(await demoteUser(body, adminContext));
       case 'deleteUser': return response.status(200).json(await deleteUser(body, adminContext));
 
-      // Notifications
       case 'sendNotification': return response.status(200).json(await sendNotification(body, adminContext));
       case 'getNotificationHistory': return response.status(200).json(await getNotificationHistory());
 
-      // Avis
       case 'getAvis': return response.status(200).json(await getAvis());
-
-      // Logs
       case 'getLogs': return response.status(200).json(await getLogs(body));
       case 'logAction': return response.status(200).json(await logAction({
         ...body,
@@ -937,16 +1053,13 @@ module.exports = async function handler(request, response) {
         adminUid: adminContext.uid
       }));
 
-      // Promos
       case 'getPromos': return response.status(200).json(await getPromos());
       case 'createPromo': return response.status(200).json(await createPromo(body, adminContext));
       case 'deletePromo': return response.status(200).json(await deletePromo(body, adminContext));
 
-      // Modération
       case 'getBanned': return response.status(200).json(await getBanned());
       case 'unbanUser': return response.status(200).json(await unbanUser(body, adminContext));
 
-      // Maintenance
       case 'toggleMaintenance': return response.status(200).json(await toggleMaintenance(body, adminContext));
 
       default:
