@@ -3103,9 +3103,15 @@ async function renderRecentLogs() {
         <span class="log-item-time">${fmtRel(l.timestamp || l.createdAt)}</span>
       </div>
     `).join('');
-  } catch (e) {
-    $('recentLogs').innerHTML = `<div class="empty"><i class="fas fa-info-circle"></i><strong>Logs indisponibles</strong></div>`;
-  }
+ } catch (e) {
+  $('recentLogs').innerHTML = `
+    <div class="error-state" style="padding:20px">
+      <i class="fas fa-info-circle"></i>
+      Logs indisponibles<br>
+      <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="window.__retry('all')">Réessayer</button>
+    </div>
+  `;
+}
 }
 
 // ================================================================
@@ -3723,17 +3729,34 @@ window.__deleteUser = async function (uid) {
   }
 };
 
+    window.__retry = function(view) {
+  if (view === 'avis') loadAvis();
+  if (view === 'promos') loadPromos();
+  if (view === 'banned') loadBanned();
+  if (view === 'logs') loadLogs();
+  if (view === 'notifs') loadNotifHistory();
+  if (view === 'all') reloadAll();
+};
+    
 // ================================================================
 // AVIS
 // ================================================================
 async function loadAvis() {
-  $('avisList').innerHTML = `<div class="loading"><div class="spinner"></div><span>Chargement...</span></div>`;
+  $('avisList').innerHTML = `<div class="loading"><div class="spinner"></div><span>Chargement des avis...</span></div>`;
   try {
     const data = await callApi('getAvis');
     state.avis = data.avis || [];
     renderAvis();
   } catch (e) {
-    $('avisList').innerHTML = `<div class="empty"><i class="fas fa-star"></i><strong>Aucun avis</strong><span>Aucun retour pour le moment.</span></div>`;
+    console.error('loadAvis error:', e);
+    $('avisList').innerHTML = `
+      <div class="error-state">
+        <i class="fas fa-exclamation-triangle"></i>
+        <strong>Impossible de charger les avis</strong><br>
+        <span style="font-size:11.5px;color:var(--text-muted)">${esc(e.message)}</span><br>
+        <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="window.__retry('avis')">Réessayer</button>
+      </div>
+    `;
   }
 }
 
@@ -3774,6 +3797,7 @@ function renderAvis() {
   </div>`;
 }
 
+    
 // ================================================================
 // PROMOS
 // ================================================================
