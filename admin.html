@@ -2262,14 +2262,31 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const $$ = (sel) => document.querySelectorAll(sel);
 
-const toDate = (v) => {
+    const toDate = (v) => {
   if (!v) return null;
-  if (typeof v.toDate === 'function') return v.toDate();
-  if (v.seconds !== undefined) return new Date(v.seconds * 1000);
+
+  // 1) Firestore Timestamp avec .toDate()
+  if (typeof v.toDate === 'function') {
+    try { return v.toDate(); } catch (e) {}
+  }
+
+  // 2) Timestamp sérialisé JSON : { _seconds, _nanoseconds } OU { seconds, nanoseconds }
+  if (v._seconds !== undefined) return new Date(v._seconds * 1000);
+  if (v.seconds !== undefined && typeof v.seconds === 'number') {
+    return new Date(v.seconds * 1000);
+  }
+
+  // 3) String ISO (cas après sérialisation côté backend)
+  if (typeof v === 'string') {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // 4) Date native ou timestamp numérique
   const d = v instanceof Date ? v : new Date(v);
   return isNaN(d.getTime()) ? null : d;
 };
-
+    
 const fmtDate = (v) => {
   const d = toDate(v);
   return d ? d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
