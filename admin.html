@@ -2697,6 +2697,23 @@ onAuthStateChanged(auth, async (user) => {
   init();
 });
 
+    // ================================================================
+// ⚡ ATTENDRE QUE CHART.JS SOIT CHARGÉ
+// ================================================================
+async function waitForChart() {
+  let attempts = 0;
+  while (!window.Chart && attempts < 50) {
+    await new Promise((r) => setTimeout(r, 100));
+    attempts++;
+  }
+  if (!window.Chart) {
+    console.error('❌ Chart.js n\'a jamais chargé');
+    return false;
+  }
+  console.log('✅ Chart.js prêt');
+  return true;
+}
+    
 // ================================================================
 // INIT
 // ================================================================
