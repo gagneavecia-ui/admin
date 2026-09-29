@@ -2213,7 +2213,13 @@ import {
   persistentLocalCache,
   persistentSingleTabManager,
   doc,
-  getDoc
+  getDoc,
+  updateDoc,
+  collection,
+  query,
+  orderBy,
+  limit,
+  onSnapshot
 } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-firestore.js";
 
 // ================================================================
@@ -2702,9 +2708,14 @@ function init() {
   bindModals();
   bindSettings();
 
-  reloadAll();
+  waitForChart().then((ready) => {
+    if (!ready) toast('Chart.js non chargé', 'error');
+    reloadAll();
+    listenToLiveNotifications();
+    registerAdminFcmToken();
+  });
 }
-
+    
 // ================================================================
 // INIT CUSTOM SELECTS
 // ================================================================
@@ -4188,6 +4199,195 @@ function bindModals() {
 // ================================================================
 window.arvConfirm = arvConfirm;
 
+    // ================================================================
+// ⚡ NOTIFICATIONS LIVE — écoute en temps réel les demandes Premium
+// ================================================================
+let liveNotifsUnsub = null;
+let lastNotifIds = new Set();
+
+function listenToLiveNotifications() {
+  if (liveNotifsUnsub) return;
+
+  const q = query(
+    collection(db, 'admin_notifications'),
+    orderBy('createdAt', 'desc'),
+    limit(20)
+  );
+
+  liveNotifsUnsub = onSnapshot(q,
+    (snap) => {
+      // Première exécution → on mémorise sans notifier
+      if (lastNotifIds.size === 0) {
+        snap.docs.forEach((d) => lastNotifIds.add(d.id));
+        return;
+      }
+
+      // Nouvelles notifs non encore vues
+      const newDocs = snap.docs.filter((d) => !lastNotifIds.has(d.id));
+      if (newDocs.length === 0) return;
+
+      newDocs.forEach((docSnap) => {
+        const data = docSnap.data();
+        lastNotifIds.add(docSnap.id);
+
+        if (data.kind === 'subscription_request') {
+          showLiveRequestToast(data);
+        }
+      });
+
+      debouncedReload();
+    },
+    (error) => {
+      console.warn('Live notifications error:', error.message);
+    }
+  );
+}
+
+// Toast visuel doré + son + vibration
+function showLiveRequestToast(data) {
+  const name = data.userName || 'Un utilisateur';
+  const planLabel = data.planLabel || 'Premium';
+  const price = data.price ? Number(data.price).toLocaleString('fr-FR') + ' F' : '';
+
+  const banner = document.createElement('div');
+  banner.className = 'live-notif-banner';
+  banner.innerHTML = `
+    <div class="live-notif-icon">💳</div>
+    <div class="live-notif-content">
+      <div class="live-notif-title">Nouvelle demande Premium</div>
+      <div class="live-notif-body">
+        <strong>${esc(name)}</strong> · ${esc(planLabel)} · ${esc(price)}
+      </div>
+    </div>
+    <button class="live-notif-action" onclick="window.__gotoPending()">Voir</button>
+    <button class="live-notif-close" aria-label="Fermer">
+      <i class="fas fa-times"></i>
+    </button>
+  `;
+
+  document.body.appendChild(banner);
+  requestAnimationFrame(() => banner.classList.add('show'));
+
+  banner.querySelector('.live-notif-close').addEventListener('click', () => {
+    banner.classList.remove('show');
+    setTimeout(() => banner.remove(), 300);
+  });
+
+  setTimeout(() => {
+    if (banner.parentNode) {
+      banner.classList.remove('show');
+      setTimeout(() => banner.remove(), 300);
+    }
+  }, 8000);
+
+  if (navigator.vibrate) {
+    try { navigator.vibrate([80, 40, 80]); } catch (e) {}
+  }
+
+  try { playNotifSound(); } catch (e) {}
+}
+
+// Petit "ding" discret (sans fichier audio)
+function playNotifSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.05, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (e) {}
+}
+
+// Debounce du reloadAll pour ne pas spammer Firestore
+let _reloadTimer = null;
+function debouncedReload() {
+  if (_reloadTimer) clearTimeout(_reloadTimer);
+  _reloadTimer = setTimeout(() => { reloadAll(); }, 2500);
+}
+
+// Bouton "Voir" du banner → va sur Abonnements filtré sur "En attente"
+window.__gotoPending = function () {
+  switchView('subscriptions');
+  if (state.customSelects.subFilterStatus) {
+    state.customSelects.subFilterStatus.select('pending');
+  }
+};
+
+// ================================================================
+// ⚡ ENREGISTRER LE TOKEN FCM DE L'ADMIN (pour recevoir les pushs)
+// ================================================================
+async function registerAdminFcmToken() {
+  try {
+    if (!('Notification' in window)) return;
+    if (!('serviceWorker' in navigator)) return;
+
+    let permission = Notification.permission;
+    if (permission === 'default') {
+      permission = await Notification.requestPermission();
+    }
+    if (permission !== 'granted') {
+      console.log('[FCM] Permission refusée');
+      return;
+    }
+
+    const { getMessaging, getToken } = await import('https://www.gstatic.com/firebasejs/12.12.1/firebase-messaging.js');
+    const VAPID_KEY = 'BKx2iXs_mlCDdDjh_JxsjOQiOlW1-95pJi8myJCr503pB8TkFjJ8bZfpZ7Fv9pYyV_O9_Ca_fbwkO5eGPrnWaHA';
+
+    const messaging = getMessaging(app);
+
+    // Utiliser le SW déjà enregistré par register-fcm-sw.js
+    let swRegistration = null;
+    try {
+      if (window.arvexaFcmRegistration) {
+        swRegistration = await window.arvexaFcmRegistration;
+      } else {
+        swRegistration = await navigator.serviceWorker.getRegistration('./firebase-cloud-messaging-push-scope');
+      }
+    } catch (e) {
+      console.warn('[FCM] SW non trouvé:', e.message);
+    }
+
+    if (!swRegistration) {
+      console.warn('[FCM] Service Worker FCM introuvable. Vérifie register-fcm-sw.js + firebase-messaging-sw.js.');
+      return;
+    }
+
+    const token = await getToken(messaging, {
+      vapidKey: VAPID_KEY,
+      serviceWorkerRegistration: swRegistration
+    });
+
+    if (!token) {
+      console.warn('[FCM] Pas de token obtenu');
+      return;
+    }
+
+    // Sauvegarder dans users/{uid}
+    const userRef = doc(db, 'users', state.user.uid);
+    const snap = await getDoc(userRef);
+    const data = snap.exists() ? snap.data() : {};
+    let tokens = Array.isArray(data.fcmTokens) ? [...data.fcmTokens] : [];
+    if (!tokens.includes(token)) tokens.push(token);
+    if (tokens.length > 5) tokens = tokens.slice(-5);
+
+    await updateDoc(userRef, {
+      fcmTokens: tokens,
+      fcmToken: token,
+      fcmTokenUpdatedAt: new Date()
+    });
+
+    console.log('✅ [FCM] Token admin enregistré');
+  } catch (e) {
+    console.warn('[FCM] Enregistrement échoué:', e.message);
+  }
+}
+    
 console.log('✅ ARVEXA Admin Console v6.0');
 </script>
 
