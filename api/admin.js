@@ -245,15 +245,6 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
         },
         webpush: {
           fcmOptions: { link: CLICK_ACTION_URL },
-          notification: {
-            title: title,
-            body: body,
-            icon: ICON_URL,
-            badge: ICON_URL,
-            vibrate: [200, 100, 200],
-            requireInteraction: false,
-            tag: 'arvexa-' + Date.now()
-          }
         }
       });
     } catch (error) {
