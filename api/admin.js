@@ -166,6 +166,166 @@ function toISO(v) {
   return null;
 }
 
+// ────────────────────────────────────────────────────────────────
+// ⚡ ANALYTICS — Agrégation des données utilisateurs
+// ────────────────────────────────────────────────────────────────
+async function getAnalytics({ startTs, endTs, filter = 'all' }) {
+  const { db } = getAdminServices();
+
+  const startDate = new Date(startTs || 0).toISOString().slice(0, 10);
+  const endDate = new Date(endTs || Date.now()).toISOString().slice(0, 10);
+
+  // 1) Récupérer les utilisateurs (filtrés)
+  const usersSnap = await db.collection('users').get();
+  let userDocs = usersSnap.docs;
+
+  if (filter === 'premium') {
+    userDocs = userDocs.filter((d) => isPremiumActive(d.data()));
+  } else if (filter === 'free') {
+    userDocs = userDocs.filter((d) => !isPremiumActive(d.data()));
+  }
+
+  // 2) Structure d'agrégation
+  const summary = {
+    totalViews: 0,
+    totalTime: 0,
+    totalSessions: 0,
+    uniqueUsers: 0,
+    avgTimePerUser: 0,
+    mostActiveDay: null,
+    mostActiveDayCount: null
+  };
+
+  const topPagesMap = {};
+  const topFeaturesMap = {};
+  const byTimeOfDay = { matin: 0, apresmidi: 0, soir: 0, nuit: 0 };
+  const byDayOfWeek = { lundi: 0, mardi: 0, mercredi: 0, jeudi: 0, vendredi: 0, samedi: 0, dimanche: 0 };
+  const byDate = {};
+  const topUsers = [];
+
+  // 3) Parcourir les utilisateurs en chunks de 10 (parallélisation)
+  const chunkSize = 10;
+  for (let i = 0; i < userDocs.length; i += chunkSize) {
+    const chunk = userDocs.slice(i, i + chunkSize);
+
+    const results = await Promise.all(
+      chunk.map(async (userDoc) => {
+        try {
+          const dailySnap = await db
+            .collection('users').doc(userDoc.id)
+            .collection('analytics_daily')
+            .where('date', '>=', startDate)
+            .where('date', '<=', endDate)
+            .get();
+          return { userDoc, dailyDocs: dailySnap.docs.map((d) => d.data()) };
+        } catch (e) {
+          return { userDoc, dailyDocs: [] };
+        }
+      })
+    );
+
+    results.forEach(({ userDoc, dailyDocs }) => {
+      const userData = userDoc.data();
+      let userTime = 0;
+      let userViews = 0;
+      let userSessions = 0;
+
+      dailyDocs.forEach((daily) => {
+        // Pages
+        if (daily.pages) {
+          Object.entries(daily.pages).forEach(([path, count]) => {
+            const p = path.replace(/_/g, '/');
+            topPagesMap[p] = (topPagesMap[p] || 0) + count;
+            userViews += count;
+          });
+        }
+
+        // Features
+        if (daily.features) {
+          Object.entries(daily.features).forEach(([feature, count]) => {
+            topFeaturesMap[feature] = (topFeaturesMap[feature] || 0) + count;
+          });
+        }
+
+        // Time of day
+        if (daily.byTimeOfDay) {
+          Object.entries(daily.byTimeOfDay).forEach(([k, v]) => {
+            byTimeOfDay[k] = (byTimeOfDay[k] || 0) + v;
+          });
+        }
+
+        // Day of week
+        if (daily.byDayOfWeek) {
+          Object.entries(daily.byDayOfWeek).forEach(([k, v]) => {
+            byDayOfWeek[k] = (byDayOfWeek[k] || 0) + v;
+          });
+        }
+
+        // Date pour la courbe
+        if (daily.date) {
+          byDate[daily.date] = (byDate[daily.date] || 0) + (daily.totalTime || 0);
+        }
+
+        userTime += daily.totalTime || 0;
+        userSessions += daily.sessions || 0;
+      });
+
+      if (userTime > 0 || userViews > 0) {
+        topUsers.push({
+          uid: userDoc.id,
+          name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Utilisateur',
+          email: userData.email || '',
+          totalTime: userTime,
+          views: userViews,
+          sessions: userSessions
+        });
+        summary.totalTime += userTime;
+        summary.totalViews += userViews;
+        summary.totalSessions += userSessions;
+        summary.uniqueUsers++;
+      }
+    });
+  }
+
+  // 4) Calculs finaux
+  if (summary.uniqueUsers > 0) {
+    summary.avgTimePerUser = Math.round(summary.totalTime / summary.uniqueUsers);
+  }
+
+  // Top pages triées
+  const topPages = Object.entries(topPagesMap)
+    .map(([path, count]) => ({ path, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  // Top features triées
+  const topFeatures = Object.entries(topFeaturesMap)
+    .map(([feature, count]) => ({ feature, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  // Top users triés par temps
+  topUsers.sort((a, b) => b.totalTime - a.totalTime);
+
+  // Jour le plus actif
+  const daysSorted = Object.entries(byDate).sort((a, b) => b[1] - a[1]);
+  if (daysSorted.length > 0) {
+    summary.mostActiveDay = daysSorted[0][0];
+    summary.mostActiveDayCount = Math.round(daysSorted[0][1] / 60) + ' min';
+  }
+
+  return {
+    success: true,
+    summary,
+    topPages,
+    topFeatures,
+    byTimeOfDay,
+    byDayOfWeek,
+    byDate,
+    topUsers: topUsers.slice(0, 20)
+  };
+}
+
 function serializeUser(doc) {
   const data = doc.data() || {};
   return {
@@ -1021,7 +1181,7 @@ module.exports = async function handler(request, response) {
       case 'checkAdmin': return response.status(200).json(await checkAdmin());
       case 'getDashboard': return response.status(200).json(await getDashboard());
       case 'getStats': return response.status(200).json(await getStats());
-
+      case 'getAnalytics': return response.status(200).json(await getAnalytics(body));
       case 'getSubscriptions': return response.status(200).json(await getSubscriptions());
       case 'getUsers': return response.status(200).json(await getUsers(body));
       case 'approveSubscription': return response.status(200).json(await approveSubscription(body, adminContext));
@@ -1052,7 +1212,8 @@ module.exports = async function handler(request, response) {
       case 'unbanUser': return response.status(200).json(await unbanUser(body, adminContext));
 
       case 'toggleMaintenance': return response.status(200).json(await toggleMaintenance(body, adminContext));
-
+     
+   
       default:
         return jsonError(response, 400, `Action inconnue : "${action}"`);
     }
