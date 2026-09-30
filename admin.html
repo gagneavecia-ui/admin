@@ -1742,10 +1742,121 @@
     .row-pending:hover {
       background: rgba(224, 184, 74, 0.06) !important;
     }
-    .row-blocked {
+       .row-blocked {
       opacity: 0.6;
     }
     .row-blocked:hover { opacity: 0.8; }
+
+    /* ================================================================
+       LIVE NOTIFICATION BANNER
+       ================================================================ */
+    .live-notif-banner {
+      position: fixed;
+      top: calc(var(--safe-top) + 14px);
+      left: 50%;
+      transform: translateX(-50%) translateY(-120%);
+      z-index: 10000;
+      width: calc(100% - 24px);
+      max-width: 460px;
+      background: linear-gradient(135deg, #1A1A1A, #0F0F0F);
+      border: 1px solid rgba(224, 184, 74, 0.4);
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(224, 184, 74, 0.15);
+      transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
+      opacity: 0;
+      pointer-events: auto;
+    }
+    .live-notif-banner.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+    .live-notif-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--gold), var(--gold-dim));
+      color: #0A0A0A;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+      animation: liveIconPulse 1.6s ease-in-out infinite;
+    }
+    @keyframes liveIconPulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(224, 184, 74, 0.4); }
+      50% { transform: scale(1.05); box-shadow: 0 0 0 8px rgba(224, 184, 74, 0); }
+    }
+    .live-notif-content { flex: 1; min-width: 0; }
+    .live-notif-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--gold);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 3px;
+    }
+    .live-notif-body {
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .live-notif-body strong { color: var(--gold); font-weight: 700; }
+    .live-notif-action {
+      flex-shrink: 0;
+      padding: 8px 14px;
+      border-radius: 100px;
+      background: linear-gradient(135deg, var(--gold), var(--gold-dim));
+      color: #0A0A0A;
+      border: none;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: var(--transition-fast);
+      min-height: 34px;
+    }
+    .live-notif-action:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(184, 134, 11, 0.4);
+    }
+    .live-notif-close {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      transition: var(--transition-fast);
+    }
+    .live-notif-close:hover {
+      color: var(--text);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: rotate(90deg);
+    }
+    html[data-theme="light"] .live-notif-banner {
+      background: linear-gradient(135deg, #FFFFFF, #F5F0E8);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(184, 134, 11, 0.15);
+    }
+    @media (max-width: 480px) {
+      .live-notif-banner { padding: 12px 12px; gap: 10px; }
+      .live-notif-icon { width: 38px; height: 38px; font-size: 18px; }
+      .live-notif-title { font-size: 11px; }
+      .live-notif-body { font-size: 12px; }
+      .live-notif-action { font-size: 11.5px; padding: 6px 11px; min-height: 30px; }
+      .live-notif-close { width: 26px; height: 26px; }
+    }
   </style>
 </head>
 <body>
@@ -2206,20 +2317,20 @@
       </button>
     </nav>
 
-    <!-- ========== MOBILE MENU (sheet) ========== -->
-    <div class="modal-back" id="mobileMenu">
-      <div class="modal" style="max-width:100%;border-radius:16px 16px 0 0">
-        <div class="modal-handle"></div>
-        <div class="sidebar-label" style="padding-top:0">Tout</div>
-        <button class="nav-btn" data-view="avis"><i class="fas fa-star"></i> Avis</button>
-        <button class="nav-btn" data-view="promo"><i class="fas fa-ticket"></i> Codes promo</button>
-        <button class="nav-btn" data-view="notifications"><i class="fas fa-bell"></i> Notifications</button>
-        <button class="nav-btn" data-view="moderation"><i class="fas fa-comments"></i> Modération</button>
-        <button class="nav-btn" data-view="logs"><i class="fas fa-clipboard-list"></i> Logs</button>
-        <button class="nav-btn" data-view="settings"><i class="fas fa-cog"></i> Paramètres</button>
-      </div>
-    </div>
-
+   <!-- ========== MOBILE MENU (sheet) ========== -->
+<div class="modal-back" id="mobileMenu">
+  <div class="modal" style="max-width:100%;border-radius:16px 16px 0 0">
+    <div class="modal-handle"></div>
+    <div class="sidebar-label" style="padding-top:0">Tout</div>
+    <button class="nav-btn" data-view="avis"><i class="fas fa-star"></i> Avis</button>
+    <button class="nav-btn" data-view="promo"><i class="fas fa-ticket"></i> Codes promo</button>
+    <button class="nav-btn" data-view="notifications"><i class="fas fa-bell"></i> Notifications</button>
+    <button class="nav-btn" data-view="moderation"><i class="fas fa-comments"></i> Modération</button>
+    <button class="nav-btn" data-view="logs"><i class="fas fa-clipboard-list"></i> Logs</button>
+    <button class="nav-btn" data-view="analytics"><i class="fas fa-chart-bar"></i> Analytics</button>
+    <button class="nav-btn" data-view="settings"><i class="fas fa-cog"></i> Paramètres</button>
+  </div>
+</div>
   </div>
 
   <!-- ==================== USER MODAL ==================== -->
@@ -2789,7 +2900,7 @@ async function waitForChart() {
 // ================================================================
 function init() {
   initCustomSelects();
-  initAnalyticsSelects();  // ⚡ AJOUTER
+  initAnalyticsSelects();
   bindNav();
   bindTopbar();
   bindFilters();
@@ -2801,7 +2912,7 @@ function init() {
     if (!ready) toast('Chart.js non chargé', 'error');
     reloadAll();
     listenToLiveNotifications();
-    registerAdminFcmToken();
+    // registerAdminFcmToken(); // ⚡ DÉSACTIVÉ — sera déclenché manuellement
   });
 }
     
