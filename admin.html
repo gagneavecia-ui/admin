@@ -1823,6 +1823,11 @@
           <i class="fas fa-comments"></i> Modération
         </button>
 
+        <div class="sidebar-label">Analyse</div>
+        <button class="nav-btn" data-view="analytics">
+        <i class="fas fa-chart-bar"></i> Analytics
+        </button>
+
         <div class="sidebar-label">Système</div>
         <button class="nav-btn" data-view="logs">
           <i class="fas fa-clipboard-list"></i> Logs
@@ -2064,6 +2069,70 @@
           </div>
         </section>
 
+        <!-- ========== ANALYTICS ========== -->
+<section class="view" id="view-analytics">
+  <div class="page-head">
+    <h1>Analytics</h1>
+    <p id="analyticsSub">Comportement des élèves</p>
+  </div>
+
+  <div class="filters">
+    <div class="custom-select" id="analyticsRange" data-name="analyticsRange"></div>
+    <div class="custom-select" id="analyticsView" data-name="analyticsView"></div>
+  </div>
+
+  <div class="grid" id="analyticsStats">
+    <div class="loading" style="grid-column:1/-1"><div class="spinner"></div><span>Chargement...</span></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <div class="block-title"><i class="fas fa-file"></i> Pages les plus visitées</div>
+    </div>
+    <div class="chart-wrap"><canvas id="chartTopPages"></canvas></div>
+    <div id="topPagesList" style="margin-top:12px"></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <div class="block-title"><i class="fas fa-tools"></i> Fonctionnalités les plus utilisées</div>
+    </div>
+    <div class="chart-wrap"><canvas id="chartTopFeatures"></canvas></div>
+    <div id="topFeaturesList" style="margin-top:12px"></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <div class="block-title"><i class="fas fa-clock"></i> Répartition par moment de la journée</div>
+    </div>
+    <div class="chart-wrap"><canvas id="chartTimeOfDay"></canvas></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <div class="block-title"><i class="fas fa-calendar"></i> Répartition par jour de la semaine</div>
+    </div>
+    <div class="chart-wrap"><canvas id="chartDayOfWeek"></canvas></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <div class="block-title"><i class="fas fa-hourglass"></i> Temps d'utilisation par jour</div>
+    </div>
+    <div class="chart-wrap"><canvas id="chartTimeSpent"></canvas></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <div class="block-title"><i class="fas fa-users"></i> Top utilisateurs</div>
+      <span class="block-sub" id="topUsersSub">—</span>
+    </div>
+    <div id="topUsersList">
+      <div class="loading"><div class="spinner"></div><span>Chargement...</span></div>
+    </div>
+  </div>
+</section>
+        
         <!-- ========== PARAMÈTRES ========== -->
         <section class="view" id="view-settings">
           <div class="page-head">
@@ -4405,6 +4474,369 @@ async function registerAdminFcmToken() {
   } catch (e) {
     console.warn('[FCM] Enregistrement échoué:', e.message);
   }
+}
+
+    // ================================================================
+// ⚡ ANALYTICS — Suivi du comportement des élèves
+// ================================================================
+function initAnalyticsSelects() {
+  state.customSelects.analyticsRange = new CustomSelect($('analyticsRange'), [
+    { value: 'today', label: "Aujourd'hui", prefix: '📅' },
+    { value: '7days', label: '7 derniers jours', prefix: '📆' },
+    { value: '30days', label: '30 derniers jours', prefix: '🗓️' },
+    { value: 'all', label: 'Tout le temps', prefix: '∞' }
+  ]);
+  state.customSelects.analyticsRange.onChange = () => loadAnalytics();
+
+  state.customSelects.analyticsView = new CustomSelect($('analyticsView'), [
+    { value: 'all', label: 'Tous les élèves', prefix: '🌐' },
+    { value: 'premium', label: 'Premium uniquement', prefix: '👑' },
+    { value: 'free', label: 'Gratuits uniquement', prefix: '🔓' }
+  ]);
+  state.customSelects.analyticsView.onChange = () => loadAnalytics();
+}
+
+async function loadAnalytics() {
+  const range = state.customSelects.analyticsRange?.getValue() || '7days';
+  const view = state.customSelects.analyticsView?.getValue() || 'all';
+
+  $('analyticsStats').innerHTML = `<div class="loading" style="grid-column:1/-1"><div class="spinner"></div><span>Chargement...</span></div>`;
+
+  try {
+    let startDate;
+    const today = new Date();
+    if (range === 'today') {
+      startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    } else if (range === '7days') {
+      startDate = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    } else if (range === '30days') {
+      startDate = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+    } else {
+      startDate = new Date(2020, 0, 1);
+    }
+
+    const data = await callApi('getAnalytics', {
+      startTs: startDate.getTime(),
+      endTs: Date.now(),
+      filter: view
+    });
+
+    renderAnalytics(data);
+  } catch (e) {
+    console.error('loadAnalytics error:', e);
+    $('analyticsStats').innerHTML = `
+      <div class="error-state" style="grid-column:1/-1">
+        <i class="fas fa-exclamation-triangle"></i>
+        Impossible de charger les analytics : ${esc(e.message)}
+      </div>
+    `;
+  }
+}
+
+function formatDuration(seconds) {
+  if (!seconds) return '0 min';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h === 0) return `${m} min`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+function renderAnalytics(data) {
+  const s = data.summary || {};
+
+  $('analyticsStats').innerHTML = `
+    <div class="card">
+      <div class="card-label"><i class="fas fa-eye"></i> Vues totales</div>
+      <div class="card-value">${s.totalViews || 0}</div>
+      <div class="card-sub">${s.uniqueUsers || 0} élèves actifs</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-clock"></i> Temps total</div>
+      <div class="card-value gold">${formatDuration(s.totalTime || 0)}</div>
+      <div class="card-sub">${s.totalSessions || 0} sessions</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-chart-line"></i> Moyenne / élève</div>
+      <div class="card-value">${formatDuration(s.avgTimePerUser || 0)}</div>
+      <div class="card-sub">Sur la période</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-fire"></i> Jour le plus actif</div>
+      <div class="card-value" style="font-size:16px">${s.mostActiveDay || '—'}</div>
+      <div class="card-sub">${s.mostActiveDayCount || '—'}</div>
+    </div>
+  `;
+
+  $('analyticsSub').textContent = `${s.totalViews || 0} vues · ${s.uniqueUsers || 0} élèves`;
+
+  renderTopPages(data.topPages || []);
+  renderTopFeatures(data.topFeatures || []);
+  renderTimeOfDayChart(data.byTimeOfDay || {});
+  renderDayOfWeekChart(data.byDayOfWeek || {});
+  renderTimeSpentChart(data.byDate || {});
+  renderTopUsers(data.topUsers || []);
+}
+
+function renderTopPages(pages) {
+  if (!pages.length) {
+    $('topPagesList').innerHTML = '<div class="empty">Aucune donnée</div>';
+    return;
+  }
+
+  const max = pages[0].count;
+  $('topPagesList').innerHTML = pages.slice(0, 8).map((p) => `
+    <div class="log-item">
+      <div class="log-item-action">
+        <i class="fas fa-file"></i>
+        <div style="min-width:0;flex:1">
+          <div style="font-size:12.5px;color:var(--text);font-weight:500">${esc(p.path)}</div>
+          <div class="progress-bar" style="margin:4px 0 0;height:4px">
+            <span style="width:${Math.round((p.count / max) * 100)}%"></span>
+          </div>
+        </div>
+      </div>
+      <span class="log-item-time">${p.count}</span>
+    </div>
+  `).join('');
+
+  if (state.charts.topPages) state.charts.topPages.destroy();
+  const ctx = $('chartTopPages');
+  if (!ctx) return;
+
+  state.charts.topPages = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: pages.slice(0, 8).map((p) => p.path.slice(0, 14) || '/'),
+      datasets: [{
+        data: pages.slice(0, 8).map((p) => p.count),
+        backgroundColor: 'rgba(224,184,74,0.7)',
+        borderRadius: 4
+      }]
+    },
+    options: { ...chartOpts(), indexAxis: 'y' }
+  });
+}
+
+function renderTopFeatures(features) {
+  if (!features.length) {
+    $('topFeaturesList').innerHTML = '<div class="empty">Aucune donnée</div>';
+    return;
+  }
+
+  const max = features[0].count;
+  const labels = {
+    calculatrice: '🧮 Calculatrice',
+    tableau_periodique: '⚛️ Tableau périodique',
+    mode_examen: '📝 Mode examen',
+    reviseur: '📚 Réviseur',
+    arv_pilot: '🎯 ARV-PILOT',
+    groupe: '💬 Groupe',
+    planificateur: '📅 Planificateur',
+    matiere: '📖 Matière',
+    chapitre: '📚 Chapitre',
+    lecture: '📄 Lecture',
+    abonnement: '💳 Abonnement',
+    profil: '👤 Profil',
+    notifications: '🔔 Notifications'
+  };
+
+  $('topFeaturesList').innerHTML = features.slice(0, 10).map((f) => `
+    <div class="log-item">
+      <div class="log-item-action">
+        <i class="fas fa-tools"></i>
+        <div style="min-width:0;flex:1">
+          <div style="font-size:12.5px;color:var(--text);font-weight:500">${esc(labels[f.feature] || f.feature)}</div>
+          <div class="progress-bar" style="margin:4px 0 0;height:4px">
+            <span style="width:${Math.round((f.count / max) * 100)}%"></span>
+          </div>
+        </div>
+      </div>
+      <span class="log-item-time">${f.count}</span>
+    </div>
+  `).join('');
+
+  if (state.charts.topFeatures) state.charts.topFeatures.destroy();
+  const ctx = $('chartTopFeatures');
+  if (!ctx) return;
+
+  state.charts.topFeatures = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: features.slice(0, 6).map((f) => labels[f.feature] || f.feature),
+      datasets: [{
+        data: features.slice(0, 6).map((f) => f.count),
+        backgroundColor: ['#E0B84A', '#3AB67E', '#4AAFE0', '#B85C3A', '#9B59B6', '#D4A017'],
+        borderWidth: 0,
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '65%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: getThemeColors().text,
+            font: { size: 11 },
+            padding: 10,
+            usePointStyle: true,
+            pointStyle: 'circle',
+            boxWidth: 8
+          }
+        },
+        tooltip: chartOpts().plugins.tooltip
+      }
+    }
+  });
+}
+
+function renderTimeOfDayChart(data) {
+  const ctx = $('chartTimeOfDay');
+  if (!ctx) return;
+  if (state.charts.timeOfDay) state.charts.timeOfDay.destroy();
+
+  const order = ['matin', 'apresmidi', 'soir', 'nuit'];
+  const labelsFr = ['Matin (6-12h)', 'Après-midi (12-18h)', 'Soir (18-22h)', 'Nuit (22-6h)'];
+  const values = order.map((l) => Math.round((data[l] || 0) / 60));
+
+  state.charts.timeOfDay = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labelsFr,
+      datasets: [{
+        data: values,
+        backgroundColor: ['#E0B84A', '#3AB67E', '#4AAFE0', '#5A5A4A'],
+        borderRadius: 6
+      }]
+    },
+    options: {
+      ...chartOpts(),
+      plugins: {
+        ...chartOpts().plugins,
+        tooltip: {
+          ...chartOpts().plugins.tooltip,
+          callbacks: { label: (ctx) => `${ctx.parsed.y} min` }
+        }
+      }
+    }
+  });
+}
+
+function renderDayOfWeekChart(data) {
+  const ctx = $('chartDayOfWeek');
+  if (!ctx) return;
+  if (state.charts.dayOfWeek) state.charts.dayOfWeek.destroy();
+
+  const order = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
+  const labelsFr = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+  const values = order.map((d) => Math.round((data[d] || 0) / 60));
+
+  state.charts.dayOfWeek = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labelsFr,
+      datasets: [{
+        data: values,
+        borderColor: '#E0B84A',
+        backgroundColor: 'rgba(224,184,74,0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.35,
+        pointRadius: 4,
+        pointBackgroundColor: '#E0B84A'
+      }]
+    },
+    options: {
+      ...chartOpts(),
+      plugins: {
+        ...chartOpts().plugins,
+        tooltip: {
+          ...chartOpts().plugins.tooltip,
+          callbacks: { label: (ctx) => `${ctx.parsed.y} min` }
+        }
+      }
+    }
+  });
+}
+
+function renderTimeSpentChart(data) {
+  const ctx = $('chartTimeSpent');
+  if (!ctx) return;
+  if (state.charts.timeSpent) state.charts.timeSpent.destroy();
+
+  const dates = Object.keys(data).sort();
+  const values = dates.map((d) => Math.round((data[d] || 0) / 60));
+
+  state.charts.timeSpent = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: dates.map((d) => {
+        const parts = d.split('-');
+        return `${parts[2]}/${parts[1]}`;
+      }),
+      datasets: [{
+        data: values,
+        borderColor: '#3AB67E',
+        backgroundColor: 'rgba(58,182,126,0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.35,
+        pointRadius: 3
+      }]
+    },
+    options: {
+      ...chartOpts(),
+      plugins: {
+        ...chartOpts().plugins,
+        tooltip: {
+          ...chartOpts().plugins.tooltip,
+          callbacks: { label: (ctx) => `${ctx.parsed.y} min` }
+        }
+      }
+    }
+  });
+}
+
+function renderTopUsers(users) {
+  if (!users.length) {
+    $('topUsersList').innerHTML = '<div class="empty"><i class="fas fa-users"></i><strong>Aucune donnée</strong></div>';
+    $('topUsersSub').textContent = '';
+    return;
+  }
+
+  $('topUsersSub').textContent = `${users.length} élève(s)`;
+
+  $('topUsersList').innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th>Élève</th><th>Temps</th><th>Vues</th><th>Sessions</th><th></th></tr>
+        </thead>
+        <tbody>
+          ${users.slice(0, 20).map((u, i) => `
+            <tr>
+              <td data-label="#" style="font-weight:700;color:var(--gold)">#${i + 1}</td>
+              <td data-label="Élève">
+                <strong>${esc(u.name || 'Utilisateur')}</strong>
+                <span class="sub">${esc(u.email || '')}</span>
+              </td>
+              <td data-label="Temps"><strong style="color:var(--gold)">${formatDuration(u.totalTime || 0)}</strong></td>
+              <td data-label="Vues">${u.views || 0}</td>
+              <td data-label="Sessions">${u.sessions || 0}</td>
+              <td data-label="">
+                <button class="btn btn-secondary btn-sm" onclick="window.__openUser('${u.uid}')">
+                  <i class="fas fa-eye"></i>
+                </button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
     
 console.log('✅ ARVEXA Admin Console v6.0');
