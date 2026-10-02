@@ -175,9 +175,20 @@ async function getAnalytics({ startTs, endTs, filter = 'all' }) {
   const startDate = new Date(startTs || 0).toISOString().slice(0, 10);
   const endDate = new Date(endTs || Date.now()).toISOString().slice(0, 10);
 
+  // ⚡ Liste des emails admin à exclure
+  const ADMIN_EMAILS = ['gagneavecia@gmail.com'];
+
   // 1) Récupérer les utilisateurs (filtrés)
   const usersSnap = await db.collection('users').get();
   let userDocs = usersSnap.docs;
+
+  // ⚡ EXCLURE LES ADMINS
+  userDocs = userDocs.filter((d) => {
+    const u = d.data();
+    if (u.role === 'admin') return false;
+    if (u.email && ADMIN_EMAILS.includes(u.email)) return false;
+    return true;
+  });
 
   if (filter === 'premium') {
     userDocs = userDocs.filter((d) => isPremiumActive(d.data()));
