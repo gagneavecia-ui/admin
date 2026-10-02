@@ -563,6 +563,29 @@ async function notifyNewSubscriptionRequest({ userUid, userName, plan, planLabel
 }
 
 // ────────────────────────────────────────────────────────────────
+// ⚡ PUSH AUX ADMINS — Nouvelle inscription
+// ────────────────────────────────────────────────────────────────
+async function notifyNewSignup({ uid, userName, userEmail, establishment }) {
+  const title = '🎉 Nouvelle inscription';
+  let body = userName || 'Nouvel élève';
+  if (establishment) body += ' · ' + establishment;
+  if (userEmail && !body.includes(userEmail)) body += ' · ' + userEmail;
+
+  const result = await notifyAdmins({
+    title,
+    body,
+    type: 'success',
+    data: {
+      kind: 'new_signup',
+      userUid: uid || '',
+      userEmail: userEmail || ''
+    }
+  });
+
+  return { ok: true, ...result };
+}
+ 
+// ────────────────────────────────────────────────────────────────
 // ACTIONS — UTILISATEURS
 // ────────────────────────────────────────────────────────────────
 async function getSubscriptions() {
@@ -1161,17 +1184,31 @@ module.exports = async function handler(request, response) {
   const body = request.body && typeof request.body === 'object' ? request.body : {};
   const action = body.action;
 
-  // ⚡ ACTION PUBLIQUE — notifier les admins (n'importe quel user connecté)
-  if (action === 'notifyNewSubscriptionRequest') {
-    const user = await verifyFirebaseToken(request);
-    if (!user) return jsonError(response, 401, 'Connexion requise.');
-    try {
-      return response.status(200).json(await notifyNewSubscriptionRequest(body));
-    } catch (e) {
-      console.error('notifyNewSubscriptionRequest error:', e.message);
-      return jsonError(response, 500, e.message || 'Erreur serveur.');
-    }
+ // ⚡ ACTIONS PUBLIQUES — notifier les admins (n'importe quel user connecté)
+
+// → Nouvelle demande Premium
+if (action === 'notifyNewSubscriptionRequest') {
+  const user = await verifyFirebaseToken(request);
+  if (!user) return jsonError(response, 401, 'Connexion requise.');
+  try {
+    return response.status(200).json(await notifyNewSubscriptionRequest(body));
+  } catch (e) {
+    console.error('notifyNewSubscriptionRequest error:', e.message);
+    return jsonError(response, 500, e.message || 'Erreur serveur.');
   }
+}
+
+// → Nouvelle inscription
+if (action === 'notifyNewSignup') {
+  const user = await verifyFirebaseToken(request);
+  if (!user) return jsonError(response, 401, 'Connexion requise.');
+  try {
+    return response.status(200).json(await notifyNewSignup(body));
+  } catch (e) {
+    console.error('notifyNewSignup error:', e.message);
+    return jsonError(response, 500, e.message || 'Erreur serveur.');
+  }
+}
 
   // 🔒 Toutes les autres actions → admin requis
   let adminContext;
