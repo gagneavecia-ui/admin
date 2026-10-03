@@ -439,10 +439,22 @@
        CHARTS
        ================================================================ */
     .chart-wrap {
-      position: relative;
-      height: 200px;
-    }
-    .chart-wrap.sm { height: 170px; }
+  position: relative;
+  height: 220px;
+  min-height: 220px;
+  width: 100%;
+}
+.chart-wrap.sm {
+  height: 180px;
+  min-height: 180px;
+}
+.chart-wrap canvas {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+}
+    
 
     /* ================================================================
        TABLES (desktop) / CARDS (mobile)
@@ -3014,7 +3026,7 @@ function switchView(view) {
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
   window.scrollTo({ top: 0, behavior: 'smooth' });
 
-  if (view === 'finance') loadFinance();
+  // ⚡ Vues sans Chart.js → appel direct
   if (view === 'subscriptions') renderSubs();
   if (view === 'users') renderUsers();
   if (view === 'avis') loadAvis();
@@ -3023,7 +3035,22 @@ function switchView(view) {
   if (view === 'logs') loadLogs();
   if (view === 'notifications') loadNotifHistory();
   if (view === 'settings') loadMaintenanceStatus();
-  if (view === 'analytics') loadAnalytics();
+
+  // ⚡ Vues AVEC Chart.js → attendre le rendu DOM avant de dessiner
+  if (view === 'finance') {
+    requestAnimationFrame(() => requestAnimationFrame(() => loadFinance()));
+  }
+  if (view === 'analytics') {
+    requestAnimationFrame(() => requestAnimationFrame(() => loadAnalytics()));
+  }
+  if (view === 'dashboard') {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (state.stats && state.stats.totalUsers !== undefined) {
+        renderSignups();
+        renderPie();
+      }
+    }));
+  }
 }
 
 // ================================================================
@@ -4613,6 +4640,12 @@ async function loadAnalytics() {
   const range = state.customSelects.analyticsRange?.getValue() || '7days';
   const view = state.customSelects.analyticsView?.getValue() || 'all';
 
+  // ⚡ Attendre Chart.js avant même de commencer
+  if (!window.Chart) {
+    console.log('⏳ Attente de Chart.js pour Analytics...');
+    await waitForChart();
+  }
+
   $('analyticsStats').innerHTML = `<div class="loading" style="grid-column:1/-1"><div class="spinner"></div><span>Chargement...</span></div>`;
 
   try {
@@ -4658,6 +4691,13 @@ function formatDuration(seconds) {
 function renderAnalytics(data) {
   const s = data.summary || {};
 
+  // ⚡ Vérifier que Chart.js est disponible
+  if (!window.Chart) {
+    console.warn('⚠️ Chart.js non chargé, on attend...');
+    setTimeout(() => renderAnalytics(data), 500);
+    return;
+  }
+
   $('analyticsStats').innerHTML = `
     <div class="card">
       <div class="card-label"><i class="fas fa-eye"></i> Vues totales</div>
@@ -4683,13 +4723,31 @@ function renderAnalytics(data) {
 
   $('analyticsSub').textContent = `${s.totalViews || 0} vues · ${s.uniqueUsers || 0} élèves`;
 
-  renderTopPages(data.topPages || []);
-  renderTopFeatures(data.topFeatures || []);
-  renderTimeOfDayChart(data.byTimeOfDay || {});
-  renderDayOfWeekChart(data.byDayOfWeek || {});
-  renderTimeSpentChart(data.byDate || {});
-  renderTopUsers(data.topUsers || []);
-}
+  // ⚡ Rendu en cascade avec délais pour être sûr que le DOM est prêt
+  requestAnimationFrame(() => {
+    try { renderTopPages(data.topPages || []); } catch (e) { console.error('renderTopPages:', e); }
+  });
+
+  requestAnimationFrame(() => {
+    try { renderTopFeatures(data.topFeatures || []); } catch (e) { console.error('renderTopFeatures:', e); }
+  });
+
+  requestAnimationFrame(() => {
+    try { renderTimeOfDayChart(data.byTimeOfDay || {}); } catch (e) { console.error('renderTimeOfDayChart:', e); }
+  });
+
+  requestAnimationFrame(() => {
+    try { renderDayOfWeekChart(data.byDayOfWeek || {}); } catch (e) { console.error('renderDayOfWeekChart:', e); }
+  });
+
+  requestAnimationFrame(() => {
+    try { renderTimeSpentChart(data.byDate || {}); } catch (e) { console.error('renderTimeSpentChart:', e); }
+  });
+
+  requestAnimationFrame(() => {
+    try { renderTopUsers(data.topUsers || []); } catch (e) { console.error('renderTopUsers:', e); }
+  });
+    }
 
 function renderTopPages(pages) {
   if (!pages.length) {
