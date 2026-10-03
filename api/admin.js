@@ -1,7 +1,6 @@
 // ================================================================
-// API ADMIN — ARVEXA School v3
-// Hébergé sur admin-89.vercel.app
-// Auth Firebase + Firestore + FCM + CORS multi-origines
+// API ADMIN — ARVEXA School v4
+// Auth Firebase + Firestore + FCM + Analytics fixed
 // ================================================================
 
 const WINDOW_MS = 60 * 1000;
@@ -11,7 +10,7 @@ const requestLog = new Map();
 const CLICK_ACTION_URL = 'https://admin-89.vercel.app/admin.html';
 const ICON_URL = 'https://arvexaschool.vercel.app/icon.png';
 
-// ⚡ Origines autorisées (public + admin)
+// Origines autorisées
 const ALLOWED_ORIGINS = [
   'https://arvexaschool.vercel.app',
   'https://admin-89.vercel.app',
@@ -19,7 +18,7 @@ const ALLOWED_ORIGINS = [
   'http://localhost:5000'
 ];
 
-// ⚡ Admins en dur (fallback si role Firestore manquant)
+// Admins en dur (fallback si role Firestore manquant)
 const ADMIN_EMAILS = ['gagneavecia@gmail.com'];
 
 let adminServices = null;
@@ -46,15 +45,9 @@ function getAdminServices() {
     throw err;
   }
 
-  if (!serviceAccount.project_id) {
-    const err = new Error('firebase_admin_missing_project');
-    err.details = 'No project_id in credentials.';
-    throw err;
-  }
-
-  if (!serviceAccount.private_key || serviceAccount.private_key.length < 100) {
-    const err = new Error('firebase_admin_invalid_key');
-    err.details = 'Invalid private_key.';
+  if (!serviceAccount.project_id || !serviceAccount.private_key) {
+    const err = new Error('firebase_admin_missing_credentials');
+    err.details = 'Missing project_id or private_key.';
     throw err;
   }
 
@@ -155,7 +148,6 @@ function isPremiumActive(u) {
   return !end || end.getTime() > Date.now();
 }
 
-// ⚡ Convertit un Timestamp Firestore en ISO string
 function toISO(v) {
   if (!v) return null;
   if (typeof v.toDate === 'function') return v.toDate().toISOString();
@@ -164,177 +156,6 @@ function toISO(v) {
   if (typeof v === 'string') return v;
   if (v instanceof Date) return v.toISOString();
   return null;
-}
-
-// ────────────────────────────────────────────────────────────────
-// ⚡ ANALYTICS — Agrégation des données utilisateurs
-// ────────────────────────────────────────────────────────────────
-async function getAnalytics({ startTs, endTs, filter = 'all' }) {
-  const { db } = getAdminServices();
-
-  const startDate = new Date(startTs || 0).toISOString().slice(0, 10);
-  const endDate = new Date(endTs || Date.now()).toISOString().slice(0, 10);
-
-  // ⚡ Liste des emails admin à exclure
-  const ADMIN_EMAILS = ['gagneavecia@gmail.com'];
-
-  // 1) Récupérer les utilisateurs (filtrés)
-  const usersSnap = await db.collection('users').get();
-  let userDocs = usersSnap.docs;
-
-  // ⚡ EXCLURE LES ADMINS
-  userDocs = userDocs.filter((d) => {
-    const u = d.data();
-    if (u.role === 'admin') return false;
-    if (u.email && ADMIN_EMAILS.includes(u.email)) return false;
-    return true;
-  });
-
-  if (filter === 'premium') {
-    userDocs = userDocs.filter((d) => isPremiumActive(d.data()));
-  } else if (filter === 'free') {
-    userDocs = userDocs.filter((d) => !isPremiumActive(d.data()));
-  }
-
-  // 2) Structure d'agrégation
-  const summary = {
-    totalViews: 0,
-    totalTime: 0,
-    totalSessions: 0,
-    uniqueUsers: 0,
-    avgTimePerUser: 0,
-    mostActiveDay: null,
-    mostActiveDayCount: null
-  };
-
-  const topPagesMap = {};
-  const topFeaturesMap = {};
-  const byTimeOfDay = { matin: 0, apresmidi: 0, soir: 0, nuit: 0 };
-  const byDayOfWeek = { lundi: 0, mardi: 0, mercredi: 0, jeudi: 0, vendredi: 0, samedi: 0, dimanche: 0 };
-  const byDate = {};
-  const topUsers = [];
-
-  // 3) Parcourir les utilisateurs en chunks de 10 (parallélisation)
-  const chunkSize = 10;
-  for (let i = 0; i < userDocs.length; i += chunkSize) {
-    const chunk = userDocs.slice(i, i + chunkSize);
-
-    const results = await Promise.all(
-      chunk.map(async (userDoc) => {
-        try {
-          const dailySnap = await db
-            .collection('users').doc(userDoc.id)
-            .collection('analytics_daily')
-            .where('date', '>=', startDate)
-            .where('date', '<=', endDate)
-            .get();
-          return { userDoc, dailyDocs: dailySnap.docs.map((d) => d.data()) };
-        } catch (e) {
-          return { userDoc, dailyDocs: [] };
-        }
-      })
-    );
-
-    results.forEach(({ userDoc, dailyDocs }) => {
-      const userData = userDoc.data();
-      let userTime = 0;
-      let userViews = 0;
-      let userSessions = 0;
-
-      dailyDocs.forEach((daily) => {
-        // Pages
-        if (daily.pages) {
-          Object.entries(daily.pages).forEach(([path, count]) => {
-            const p = path.replace(/_/g, '/');
-            topPagesMap[p] = (topPagesMap[p] || 0) + count;
-            userViews += count;
-          });
-        }
-
-        // Features
-        if (daily.features) {
-          Object.entries(daily.features).forEach(([feature, count]) => {
-            topFeaturesMap[feature] = (topFeaturesMap[feature] || 0) + count;
-          });
-        }
-
-        // Time of day
-        if (daily.byTimeOfDay) {
-          Object.entries(daily.byTimeOfDay).forEach(([k, v]) => {
-            byTimeOfDay[k] = (byTimeOfDay[k] || 0) + v;
-          });
-        }
-
-        // Day of week
-        if (daily.byDayOfWeek) {
-          Object.entries(daily.byDayOfWeek).forEach(([k, v]) => {
-            byDayOfWeek[k] = (byDayOfWeek[k] || 0) + v;
-          });
-        }
-
-        // Date pour la courbe
-        if (daily.date) {
-          byDate[daily.date] = (byDate[daily.date] || 0) + (daily.totalTime || 0);
-        }
-
-        userTime += daily.totalTime || 0;
-        userSessions += daily.sessions || 0;
-      });
-
-      if (userTime > 0 || userViews > 0) {
-        topUsers.push({
-          uid: userDoc.id,
-          name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Utilisateur',
-          email: userData.email || '',
-          totalTime: userTime,
-          views: userViews,
-          sessions: userSessions
-        });
-        summary.totalTime += userTime;
-        summary.totalViews += userViews;
-        summary.totalSessions += userSessions;
-        summary.uniqueUsers++;
-      }
-    });
-  }
-
-  // 4) Calculs finaux
-  if (summary.uniqueUsers > 0) {
-    summary.avgTimePerUser = Math.round(summary.totalTime / summary.uniqueUsers);
-  }
-
-  // Top pages triées
-  const topPages = Object.entries(topPagesMap)
-    .map(([path, count]) => ({ path, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 10);
-
-  // Top features triées
-  const topFeatures = Object.entries(topFeaturesMap)
-    .map(([feature, count]) => ({ feature, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 10);
-
-  // Top users triés par temps
-  topUsers.sort((a, b) => b.totalTime - a.totalTime);
-
-  // Jour le plus actif
-  const daysSorted = Object.entries(byDate).sort((a, b) => b[1] - a[1]);
-  if (daysSorted.length > 0) {
-    summary.mostActiveDay = daysSorted[0][0];
-    summary.mostActiveDayCount = Math.round(daysSorted[0][1] / 60) + ' min';
-  }
-
-  return {
-    success: true,
-    summary,
-    topPages,
-    topFeatures,
-    byTimeOfDay,
-    byDayOfWeek,
-    byDate,
-    topUsers: topUsers.slice(0, 20)
-  };
 }
 
 function serializeUser(doc) {
@@ -375,7 +196,6 @@ function serializeUser(doc) {
   };
 }
 
-// ⚡ Récupère tous les tokens d'un user
 function getUserTokens(data) {
   const tokens = new Set();
   if (Array.isArray(data?.fcmTokens)) {
@@ -388,7 +208,7 @@ function getUserTokens(data) {
 }
 
 // ────────────────────────────────────────────────────────────────
-// FCM — ENVOI PUSH
+// FCM
 // ────────────────────────────────────────────────────────────────
 async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
   if (!Array.isArray(tokens) || tokens.length === 0) {
@@ -415,7 +235,7 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
           ...data
         },
         webpush: {
-          fcmOptions: { link: CLICK_ACTION_URL },
+          fcmOptions: { link: CLICK_ACTION_URL }
         }
       });
     } catch (error) {
@@ -444,7 +264,6 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
   return { successCount, failureCount, invalidTokens };
 }
 
-// ⚡ NOTIFIE TOUS LES ADMINS (push)
 async function notifyAdmins({ title, body, type = 'info', data = {} }) {
   const { db } = getAdminServices();
   const usersSnap = await db.collection('users').get();
@@ -456,24 +275,15 @@ async function notifyAdmins({ title, body, type = 'info', data = {} }) {
 
   const tokens = [];
   adminDocs.forEach((docSnap) => {
-    const u = docSnap.data();
-    getUserTokens(u).forEach((t) => tokens.push(t));
+    getUserTokens(docSnap.data()).forEach((t) => tokens.push(t));
   });
 
   const uniqueTokens = [...new Set(tokens)];
   if (uniqueTokens.length === 0) {
-    console.log('[PUSH] Aucun token admin trouvé');
     return { sent: 0, failed: 0 };
   }
 
-  const result = await sendPushToUsers(uniqueTokens, {
-    title,
-    body,
-    type,
-    data
-  });
-
-  console.log(`[PUSH] Admins notifiés : ${result.successCount}/${uniqueTokens.length}`);
+  const result = await sendPushToUsers(uniqueTokens, { title, body, type, data });
   return { sent: result.successCount, failed: result.failureCount, invalidTokens: result.invalidTokens };
 }
 
@@ -494,7 +304,7 @@ async function logAction({ action, target = '', details = {}, adminEmail, adminU
 }
 
 // ────────────────────────────────────────────────────────────────
-// ACTIONS — DASHBOARD / STATS
+// DASHBOARD & STATS
 // ────────────────────────────────────────────────────────────────
 async function checkAdmin() {
   return { ok: true };
@@ -542,7 +352,192 @@ async function getStats() {
 }
 
 // ────────────────────────────────────────────────────────────────
-// ⚡ ACTION PUBLIQUE — Notifier les admins d'une demande
+// ⚡ ANALYTICS — Lecture des agrégats (FIX: filtre côté serveur)
+// ────────────────────────────────────────────────────────────────
+async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = false }) {
+  const { db } = getAdminServices();
+
+  const startDate = new Date(startTs || 0).toISOString().slice(0, 10);
+  const endDate = new Date(endTs || Date.now()).toISOString().slice(0, 10);
+
+  console.log(`[ANALYTICS] Période : ${startDate} → ${endDate} | filter=${filter} | includeAdmin=${includeAdmin}`);
+
+  // 1) Récupérer tous les utilisateurs
+  const usersSnap = await db.collection('users').get();
+  let userDocs = usersSnap.docs;
+
+  // ⚡ Exclure les admins (sauf si includeAdmin === true)
+  if (!includeAdmin) {
+    userDocs = userDocs.filter((d) => {
+      const u = d.data();
+      if (u.role === 'admin') return false;
+      if (u.email && ADMIN_EMAILS.includes(u.email)) return false;
+      return true;
+    });
+  }
+
+  // Filtre premium/free
+  if (filter === 'premium') {
+    userDocs = userDocs.filter((d) => isPremiumActive(d.data()));
+  } else if (filter === 'free') {
+    userDocs = userDocs.filter((d) => !isPremiumActive(d.data()));
+  }
+
+  console.log(`[ANALYTICS] ${userDocs.length} utilisateur(s) à analyser`);
+
+  // 2) Structure d'agrégation
+  const summary = {
+    totalViews: 0,
+    totalTime: 0,
+    totalSessions: 0,
+    uniqueUsers: 0,
+    avgTimePerUser: 0,
+    mostActiveDay: null,
+    mostActiveDayCount: null
+  };
+
+  const topPagesMap = {};
+  const topFeaturesMap = {};
+  const byTimeOfDay = { matin: 0, apresmidi: 0, soir: 0, nuit: 0 };
+  const byDayOfWeek = { lundi: 0, mardi: 0, mercredi: 0, jeudi: 0, vendredi: 0, samedi: 0, dimanche: 0 };
+  const byDate = {};
+  const topUsers = [];
+
+  // 3) Parcourir les utilisateurs en chunks de 10
+  const chunkSize = 10;
+  for (let i = 0; i < userDocs.length; i += chunkSize) {
+    const chunk = userDocs.slice(i, i + chunkSize);
+
+    const results = await Promise.all(
+      chunk.map(async (userDoc) => {
+        try {
+          // ⚡ LIRE TOUT puis filtrer côté serveur
+          // (évite les index composites Firestore)
+          const dailySnap = await db
+            .collection('users').doc(userDoc.id)
+            .collection('analytics_daily')
+            .get();
+
+          // Filtre par date côté JS
+          const dailyDocs = dailySnap.docs
+            .map((d) => d.data())
+            .filter((daily) => {
+              if (!daily.date) return false;
+              const docDate = String(daily.date);
+              return docDate >= startDate && docDate <= endDate;
+            });
+
+          return { userDoc, dailyDocs };
+        } catch (e) {
+          console.warn(`[ANALYTICS] Erreur lecture pour ${userDoc.id}:`, e.message);
+          return { userDoc, dailyDocs: [] };
+        }
+      })
+    );
+
+    // Agréger
+    results.forEach(({ userDoc, dailyDocs }) => {
+      const userData = userDoc.data();
+      let userTime = 0;
+      let userViews = 0;
+      let userSessions = 0;
+
+      dailyDocs.forEach((daily) => {
+        // Pages
+        if (daily.pages) {
+          Object.entries(daily.pages).forEach(([path, count]) => {
+            const p = path.replace(/_/g, '/');
+            topPagesMap[p] = (topPagesMap[p] || 0) + count;
+            userViews += count;
+          });
+        }
+
+        // Features
+        if (daily.features) {
+          Object.entries(daily.features).forEach(([feature, count]) => {
+            topFeaturesMap[feature] = (topFeaturesMap[feature] || 0) + count;
+          });
+        }
+
+        // Time of day
+        if (daily.byTimeOfDay) {
+          Object.entries(daily.byTimeOfDay).forEach(([k, v]) => {
+            byTimeOfDay[k] = (byTimeOfDay[k] || 0) + v;
+          });
+        }
+
+        // Day of week
+        if (daily.byDayOfWeek) {
+          Object.entries(daily.byDayOfWeek).forEach(([k, v]) => {
+            byDayOfWeek[k] = (byDayOfWeek[k] || 0) + v;
+          });
+        }
+
+        // Date
+        if (daily.date) {
+          byDate[daily.date] = (byDate[daily.date] || 0) + (daily.totalTime || 0);
+        }
+
+        userTime += daily.totalTime || 0;
+        userSessions += daily.sessions || 0;
+      });
+
+      if (userTime > 0 || userViews > 0) {
+        topUsers.push({
+          uid: userDoc.id,
+          name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Utilisateur',
+          email: userData.email || '',
+          totalTime: userTime,
+          views: userViews,
+          sessions: userSessions
+        });
+        summary.totalTime += userTime;
+        summary.totalViews += userViews;
+        summary.totalSessions += userSessions;
+        summary.uniqueUsers++;
+      }
+    });
+  }
+
+  // 4) Calculs finaux
+  if (summary.uniqueUsers > 0) {
+    summary.avgTimePerUser = Math.round(summary.totalTime / summary.uniqueUsers);
+  }
+
+  const topPages = Object.entries(topPagesMap)
+    .map(([path, count]) => ({ path, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  const topFeatures = Object.entries(topFeaturesMap)
+    .map(([feature, count]) => ({ feature, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  topUsers.sort((a, b) => b.totalTime - a.totalTime);
+
+  const daysSorted = Object.entries(byDate).sort((a, b) => b[1] - a[1]);
+  if (daysSorted.length > 0) {
+    summary.mostActiveDay = daysSorted[0][0];
+    summary.mostActiveDayCount = Math.round(daysSorted[0][1] / 60) + ' min';
+  }
+
+  console.log(`[ANALYTICS] Résultat : ${summary.totalViews} vues, ${summary.uniqueUsers} users, ${summary.totalTime}s`);
+
+  return {
+    success: true,
+    summary,
+    topPages,
+    topFeatures,
+    byTimeOfDay,
+    byDayOfWeek,
+    byDate,
+    topUsers: topUsers.slice(0, 20)
+  };
+}
+
+// ────────────────────────────────────────────────────────────────
+// ACTIONS PUBLIQUES — Notifier les admins
 // ────────────────────────────────────────────────────────────────
 async function notifyNewSubscriptionRequest({ userUid, userName, plan, planLabel, price, requestId }) {
   const title = '💳 Nouvelle demande Premium';
@@ -562,14 +557,14 @@ async function notifyNewSubscriptionRequest({ userUid, userName, plan, planLabel
   return { ok: true, ...result };
 }
 
-// ────────────────────────────────────────────────────────────────
-// ⚡ PUSH AUX ADMINS — Nouvelle inscription
-// ────────────────────────────────────────────────────────────────
 async function notifyNewSignup({ uid, userName, userEmail, establishment }) {
+  if (userEmail && ADMIN_EMAILS.includes(userEmail.toLowerCase())) {
+    return { ok: true, skipped: true };
+  }
+
   const title = '🎉 Nouvelle inscription';
   let body = userName || 'Nouvel élève';
   if (establishment) body += ' · ' + establishment;
-  if (userEmail && !body.includes(userEmail)) body += ' · ' + userEmail;
 
   const result = await notifyAdmins({
     title,
@@ -584,9 +579,9 @@ async function notifyNewSignup({ uid, userName, userEmail, establishment }) {
 
   return { ok: true, ...result };
 }
- 
+
 // ────────────────────────────────────────────────────────────────
-// ACTIONS — UTILISATEURS
+// UTILISATEURS
 // ────────────────────────────────────────────────────────────────
 async function getSubscriptions() {
   const { db } = getAdminServices();
@@ -646,7 +641,7 @@ async function approveSubscription({ uid }, adminCtx) {
   });
 
   const notifTitle = '🎉 Premium activé !';
-  const notifBody = `Ton abonnement ${plan === 'annual' ? 'annuel' : 'mensuel'} a été activé. Tu as maintenant accès à tous les contenus.`;
+  const notifBody = `Ton abonnement ${plan === 'annual' ? 'annuel' : 'mensuel'} a été activé.`;
 
   await db.collection('users').doc(uid).collection('notifications').add({
     title: notifTitle,
@@ -678,7 +673,6 @@ async function approveSubscription({ uid }, adminCtx) {
         }).catch(() => {});
       }
     } catch (error) {
-      console.error('Push FCM failed:', error.message);
       pushFailed = tokens.length;
     }
   }
@@ -711,7 +705,7 @@ async function rejectSubscription({ uid }, adminCtx) {
 
   await db.collection('users').doc(uid).collection('notifications').add({
     title: '❌ Demande refusée',
-    body: "Ta demande d'abonnement n'a pas pu être validée. Contacte le support.",
+    body: "Ta demande d'abonnement n'a pas pu être validée.",
     type: 'error',
     read: false,
     createdAt: FieldValue.serverTimestamp()
@@ -751,22 +745,20 @@ async function giftPremium({ uid, months = 1 }, adminCtx) {
 
   await db.collection('users').doc(uid).collection('notifications').add({
     title: '🎁 Premium offert !',
-    body: `Un administrateur t'a offert ${months} mois de Premium. Profite bien !`,
+    body: `Un administrateur t'a offert ${months} mois de Premium.`,
     type: 'success',
     read: false,
     createdAt: FieldValue.serverTimestamp()
   });
 
   const tokens = getUserTokens(data);
-  let pushSent = 0;
   if (tokens.length > 0) {
     try {
-      const r = await sendPushToUsers(tokens, {
+      await sendPushToUsers(tokens, {
         title: '🎁 Premium offert !',
         body: `Un administrateur t'a offert ${months} mois de Premium.`,
         type: 'success'
       });
-      pushSent = r.successCount;
     } catch (e) {}
   }
 
@@ -778,7 +770,7 @@ async function giftPremium({ uid, months = 1 }, adminCtx) {
     adminUid: adminCtx?.uid
   });
 
-  return { ok: true, pushSent };
+  return { ok: true };
 }
 
 async function revokePremium({ uid }, adminCtx) {
@@ -795,14 +787,6 @@ async function revokePremium({ uid }, adminCtx) {
     hasDeposited: false,
     subscriptionStatus: 'expired',
     updatedAt: FieldValue.serverTimestamp()
-  });
-
-  await db.collection('users').doc(uid).collection('notifications').add({
-    title: '⚠️ Abonnement révoqué',
-    body: "Ton accès Premium a été suspendu.",
-    type: 'warning',
-    read: false,
-    createdAt: FieldValue.serverTimestamp()
   });
 
   await logAction({
@@ -846,10 +830,7 @@ async function promoteUser({ uid }, adminCtx) {
   const userSnap = await userRef.get();
   if (!userSnap.exists) throw { status: 404, message: 'Utilisateur introuvable.' };
 
-  await userRef.update({
-    role: 'admin',
-    updatedAt: FieldValue.serverTimestamp()
-  });
+  await userRef.update({ role: 'admin', updatedAt: FieldValue.serverTimestamp() });
 
   await logAction({
     action: 'Promotion admin',
@@ -867,10 +848,7 @@ async function demoteUser({ uid }, adminCtx) {
   const userSnap = await userRef.get();
   if (!userSnap.exists) throw { status: 404, message: 'Utilisateur introuvable.' };
 
-  await userRef.update({
-    role: 'student',
-    updatedAt: FieldValue.serverTimestamp()
-  });
+  await userRef.update({ role: 'student', updatedAt: FieldValue.serverTimestamp() });
 
   await logAction({
     action: 'Retrait admin',
@@ -892,13 +870,8 @@ async function deleteUser({ uid }, adminCtx) {
   if (data.role === 'admin') throw { status: 403, message: 'Impossible de supprimer un admin.' };
 
   const email = data.email || uid;
-
   await userRef.delete();
-  try {
-    await auth.deleteUser(uid);
-  } catch (e) {
-    console.warn('Auth delete failed:', e.message);
-  }
+  try { await auth.deleteUser(uid); } catch (e) {}
 
   await logAction({
     action: 'Suppression profil',
@@ -911,7 +884,7 @@ async function deleteUser({ uid }, adminCtx) {
 }
 
 // ────────────────────────────────────────────────────────────────
-// ACTIONS — NOTIFICATIONS
+// NOTIFICATIONS
 // ────────────────────────────────────────────────────────────────
 async function sendNotification({ target, email, title, message, type }, adminCtx) {
   const { db, FieldValue } = getAdminServices();
@@ -936,9 +909,7 @@ async function sendNotification({ target, email, title, message, type }, adminCt
   if (target === 'free') docs = docs.filter((d) => !isPremiumActive(d.data()));
   if (target === 'premium') docs = docs.filter((d) => isPremiumActive(d.data()));
 
-  if (docs.length === 0) {
-    return { ok: true, count: 0, pushSent: 0, pushFailed: 0 };
-  }
+  if (docs.length === 0) return { ok: true, count: 0, pushSent: 0, pushFailed: 0 };
 
   const now = FieldValue.serverTimestamp();
   const tokens = [];
@@ -955,7 +926,6 @@ async function sendNotification({ target, email, title, message, type }, adminCt
         read: false,
         createdAt: now
       });
-
       getUserTokens(doc.data()).forEach((t) => tokens.push({ token: t, uid: doc.id }));
       count++;
     });
@@ -970,25 +940,6 @@ async function sendNotification({ target, email, title, message, type }, adminCt
     const pushResult = await sendPushToUsers(uniqueTokens, { title, body: message, type });
     pushSent = pushResult.successCount;
     pushFailed = pushResult.failureCount;
-
-    if (pushResult.invalidTokens.length > 0) {
-      const invalidSet = new Set(pushResult.invalidTokens);
-      const cleanupBatch = db.batch();
-      let hasCleanup = false;
-
-      tokens.forEach(({ token, uid }) => {
-        if (invalidSet.has(token)) {
-          cleanupBatch.update(db.collection('users').doc(uid), {
-            fcmToken: FieldValue.delete()
-          });
-          hasCleanup = true;
-        }
-      });
-
-      if (hasCleanup) {
-        try { await cleanupBatch.commit(); } catch (e) {}
-      }
-    }
   }
 
   await db.collection('admin_notifications').add({
@@ -1031,7 +982,7 @@ async function getNotificationHistory() {
 }
 
 // ────────────────────────────────────────────────────────────────
-// ACTIONS — AVIS / LOGS / PROMOS / BANNED / MAINTENANCE
+// AVIS / LOGS / PROMOS / BANNED / MAINTENANCE
 // ────────────────────────────────────────────────────────────────
 async function getAvis() {
   const { db } = getAdminServices();
@@ -1084,9 +1035,7 @@ async function createPromo({ code, discount }, adminCtx) {
   const codeUpper = code.toUpperCase().trim();
   const ref = db.collection('promoCodes').doc(codeUpper);
   const existing = await ref.get();
-  if (existing.exists) {
-    throw { status: 409, message: 'Ce code existe déjà.' };
-  }
+  if (existing.exists) throw { status: 409, message: 'Ce code existe déjà.' };
 
   await ref.set({
     code: codeUpper,
@@ -1161,13 +1110,12 @@ async function toggleMaintenance({ enabled }, adminCtx) {
   });
 
   return { ok: true, enabled: Boolean(enabled) };
-}
+    }
 
 // ────────────────────────────────────────────────────────────────
 // HANDLER PRINCIPAL
 // ────────────────────────────────────────────────────────────────
 module.exports = async function handler(request, response) {
-  // ⚡ CORS
   applyCors(request, response);
 
   if (request.method === 'OPTIONS') return response.status(204).end();
@@ -1184,31 +1132,29 @@ module.exports = async function handler(request, response) {
   const body = request.body && typeof request.body === 'object' ? request.body : {};
   const action = body.action;
 
- // ⚡ ACTIONS PUBLIQUES — notifier les admins (n'importe quel user connecté)
+  // ⚡ ACTIONS PUBLIQUES (n'importe quel user connecté)
 
-// → Nouvelle demande Premium
-if (action === 'notifyNewSubscriptionRequest') {
-  const user = await verifyFirebaseToken(request);
-  if (!user) return jsonError(response, 401, 'Connexion requise.');
-  try {
-    return response.status(200).json(await notifyNewSubscriptionRequest(body));
-  } catch (e) {
-    console.error('notifyNewSubscriptionRequest error:', e.message);
-    return jsonError(response, 500, e.message || 'Erreur serveur.');
+  if (action === 'notifyNewSubscriptionRequest') {
+    const user = await verifyFirebaseToken(request);
+    if (!user) return jsonError(response, 401, 'Connexion requise.');
+    try {
+      return response.status(200).json(await notifyNewSubscriptionRequest(body));
+    } catch (e) {
+      console.error('notifyNewSubscriptionRequest error:', e.message);
+      return jsonError(response, 500, e.message || 'Erreur serveur.');
+    }
   }
-}
 
-// → Nouvelle inscription
-if (action === 'notifyNewSignup') {
-  const user = await verifyFirebaseToken(request);
-  if (!user) return jsonError(response, 401, 'Connexion requise.');
-  try {
-    return response.status(200).json(await notifyNewSignup(body));
-  } catch (e) {
-    console.error('notifyNewSignup error:', e.message);
-    return jsonError(response, 500, e.message || 'Erreur serveur.');
+  if (action === 'notifyNewSignup') {
+    const user = await verifyFirebaseToken(request);
+    if (!user) return jsonError(response, 401, 'Connexion requise.');
+    try {
+      return response.status(200).json(await notifyNewSignup(body));
+    } catch (e) {
+      console.error('notifyNewSignup error:', e.message);
+      return jsonError(response, 500, e.message || 'Erreur serveur.');
+    }
   }
-}
 
   // 🔒 Toutes les autres actions → admin requis
   let adminContext;
@@ -1230,6 +1176,7 @@ if (action === 'notifyNewSignup') {
       case 'getDashboard': return response.status(200).json(await getDashboard());
       case 'getStats': return response.status(200).json(await getStats());
       case 'getAnalytics': return response.status(200).json(await getAnalytics(body));
+
       case 'getSubscriptions': return response.status(200).json(await getSubscriptions());
       case 'getUsers': return response.status(200).json(await getUsers(body));
       case 'approveSubscription': return response.status(200).json(await approveSubscription(body, adminContext));
@@ -1260,8 +1207,7 @@ if (action === 'notifyNewSignup') {
       case 'unbanUser': return response.status(200).json(await unbanUser(body, adminContext));
 
       case 'toggleMaintenance': return response.status(200).json(await toggleMaintenance(body, adminContext));
-     
-   
+
       default:
         return jsonError(response, 400, `Action inconnue : "${action}"`);
     }
