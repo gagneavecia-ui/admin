@@ -376,7 +376,6 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
     });
   }
 
-  // Filtre premium/free
   if (filter === 'premium') {
     userDocs = userDocs.filter((d) => isPremiumActive(d.data()));
   } else if (filter === 'free') {
@@ -403,7 +402,7 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
   const byDate = {};
   const topUsers = [];
 
-  // 3) Parcourir les utilisateurs en chunks de 10
+  // 3) Parcourir les utilisateurs en chunks
   const chunkSize = 10;
   for (let i = 0; i < userDocs.length; i += chunkSize) {
     const chunk = userDocs.slice(i, i + chunkSize);
@@ -411,14 +410,11 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
     const results = await Promise.all(
       chunk.map(async (userDoc) => {
         try {
-          // ⚡ LIRE TOUT puis filtrer côté serveur
-          // (évite les index composites Firestore)
           const dailySnap = await db
             .collection('users').doc(userDoc.id)
             .collection('analytics_daily')
             .get();
 
-          // Filtre par date côté JS
           const dailyDocs = dailySnap.docs
             .map((d) => d.data())
             .filter((daily) => {
@@ -435,7 +431,7 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
       })
     );
 
-    // Agréger
+    // ⚡ Agréger (corrigé pour gérer les champs plats ET les objets imbriqués)
     results.forEach(({ userDoc, dailyDocs }) => {
       const userData = userDoc.data();
       let userTime = 0;
@@ -443,43 +439,60 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
       let userSessions = 0;
 
       dailyDocs.forEach((daily) => {
-        // Pages
-        if (daily.pages) {
-          Object.entries(daily.pages).forEach(([path, count]) => {
-            const p = path.replace(/_/g, '/');
-            topPagesMap[p] = (topPagesMap[p] || 0) + count;
-            userViews += count;
-          });
-        }
+        // ⚡ PAGES — lire les 2 formats
+        const pages = { ...(daily.pages || {}) };
+        Object.entries(daily).forEach(([key, value]) => {
+          if (key.startsWith('pages.')) {
+            pages[key.replace('pages.', '')] = value;
+          }
+        });
+        Object.entries(pages).forEach(([path, count]) => {
+          const p = String(path).replace(/_/g, '/');
+          topPagesMap[p] = (topPagesMap[p] || 0) + Number(count || 0);
+          userViews += Number(count || 0);
+        });
 
-        // Features
-        if (daily.features) {
-          Object.entries(daily.features).forEach(([feature, count]) => {
-            topFeaturesMap[feature] = (topFeaturesMap[feature] || 0) + count;
-          });
-        }
+        // ⚡ FEATURES
+        const features = { ...(daily.features || {}) };
+        Object.entries(daily).forEach(([key, value]) => {
+          if (key.startsWith('features.')) {
+            features[key.replace('features.', '')] = value;
+          }
+        });
+        Object.entries(features).forEach(([feature, count]) => {
+          topFeaturesMap[feature] = (topFeaturesMap[feature] || 0) + Number(count || 0);
+        });
 
-        // Time of day
-        if (daily.byTimeOfDay) {
-          Object.entries(daily.byTimeOfDay).forEach(([k, v]) => {
-            byTimeOfDay[k] = (byTimeOfDay[k] || 0) + v;
-          });
-        }
+        // ⚡ TIME OF DAY
+        const timeOfDay = { ...(daily.byTimeOfDay || {}) };
+        Object.entries(daily).forEach(([key, value]) => {
+          if (key.startsWith('byTimeOfDay.')) {
+            timeOfDay[key.replace('byTimeOfDay.', '')] = value;
+          }
+        });
+        Object.entries(timeOfDay).forEach(([k, v]) => {
+          byTimeOfDay[k] = (byTimeOfDay[k] || 0) + Number(v || 0);
+        });
 
-        // Day of week
-        if (daily.byDayOfWeek) {
-          Object.entries(daily.byDayOfWeek).forEach(([k, v]) => {
-            byDayOfWeek[k] = (byDayOfWeek[k] || 0) + v;
-          });
-        }
+        // ⚡ DAY OF WEEK
+        const dayOfWeek = { ...(daily.byDayOfWeek || {}) };
+        Object.entries(daily).forEach(([key, value]) => {
+          if (key.startsWith('byDayOfWeek.')) {
+            dayOfWeek[key.replace('byDayOfWeek.', '')] = value;
+          }
+        });
+        Object.entries(dayOfWeek).forEach(([k, v]) => {
+          byDayOfWeek[k] = (byDayOfWeek[k] || 0) + Number(v || 0);
+        });
 
-        // Date
+        // ⚡ DATE
         if (daily.date) {
-          byDate[daily.date] = (byDate[daily.date] || 0) + (daily.totalTime || 0);
+          byDate[daily.date] = (byDate[daily.date] || 0) + (Number(daily.totalTime) || 0);
         }
 
-        userTime += daily.totalTime || 0;
-        userSessions += daily.sessions || 0;
+        // ⚡ TOTAL
+        userTime += Number(daily.totalTime) || 0;
+        userSessions += Number(daily.sessions) || 0;
       });
 
       if (userTime > 0 || userViews > 0) {
