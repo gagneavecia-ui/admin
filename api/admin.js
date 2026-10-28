@@ -207,6 +207,25 @@ function getUserTokens(data) {
   return Array.from(tokens);
 }
 
+// ⚡ ANTI-DOUBLON DÉFINITIF (expertise Task 38-quater-ter) : un
+// utilisateur = UN SEUL token push (le token COURANT, mis à jour à
+// chaque ouverture d'app). Preuve forensique : un même appareil peut
+// détenir 2 abonnements push VALABLES pour la même app (PWA installée
+// + onglet navigateur = 2 conteneurs distincts) → envoyer à TOUS les
+// tokens du doc faisait arriver 2 notifications identiques sur le
+// MÊME écran, et le tag webpush ne peut pas les fusionner (ce sont
+// des enregistrements SW différents). Les notifications in-app
+// (sous-collection notifications) restent intactes sur tous les
+// appareils ; seul le PUSH passe au token le plus récent.
+function getPrimaryUserTokens(data) {
+  const current = typeof data?.fcmToken === 'string' && data.fcmToken.length > 20
+    ? data.fcmToken
+    : null;
+  if (current) return [current];
+  // Repli : utilisateurs sans champ fcmToken (anciens documents)
+  return getUserTokens(data);
+}
+
 // ────────────────────────────────────────────────────────────────
 // FCM
 // ────────────────────────────────────────────────────────────────
@@ -331,7 +350,8 @@ async function notifyAdmins({ title, body, type = 'info', data = {} }) {
 
   const pairs = [];
   adminDocs.forEach((docSnap) => {
-    getUserTokens(docSnap.data()).forEach((t) => pairs.push({ token: t, uid: docSnap.id }));
+    // ⚡ Token COURANT uniquement (anti-doublon multi-abonnements)
+    getPrimaryUserTokens(docSnap.data()).forEach((t) => pairs.push({ token: t, uid: docSnap.id }));
   });
 
   const uniqueTokens = [...new Set(pairs.map((p) => p.token))];
@@ -723,7 +743,7 @@ async function approveSubscription({ uid }, adminCtx) {
 
   let pushSent = 0;
   let pushFailed = 0;
-  const tokens = getUserTokens(data);
+  const tokens = getPrimaryUserTokens(data); // ⚡ token courant (anti-doublon)
   if (tokens.length > 0) {
     try {
       const pushResult = await sendPushToUsers(tokens, {
@@ -821,7 +841,7 @@ async function giftPremium({ uid, months = 1 }, adminCtx) {
     createdAt: FieldValue.serverTimestamp()
   });
 
-  const tokens = getUserTokens(data);
+  const tokens = getPrimaryUserTokens(data); // ⚡ token courant (anti-doublon)
   if (tokens.length > 0) {
     try {
       const giftPush = await sendPushToUsers(tokens, {
@@ -997,7 +1017,8 @@ async function sendNotification({ target, email, title, message, type }, adminCt
         read: false,
         createdAt: now
       });
-      getUserTokens(doc.data()).forEach((t) => tokens.push({ token: t, uid: doc.id }));
+      // ⚡ Token COURANT uniquement (anti-doublon multi-abonnements)
+      getPrimaryUserTokens(doc.data()).forEach((t) => tokens.push({ token: t, uid: doc.id }));
       count++;
     });
     await batch.commit();
