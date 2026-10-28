@@ -31,6 +31,12 @@ function getSafeNotificationUrl(value) {
 messaging.onBackgroundMessage((payload) => {
   console.log('[FCM-Admin-SW] Message reçu:', payload);
 
+  // ⚡ ANTI-DOUBLON : si le push contient un payload `notification` natif
+  // (backend ≥ v1.1), le SDK FCM l'affiche AUTOMATIQUEMENT en arrière-plan
+  // ET nous appelle quand même ici → on n'affiche PLUS une 2e fois.
+  // Ce handler ne traite désormais que les messages data-only (historique).
+  if (payload.notification && payload.notification.title) return;
+
   const notificationTitle =
     payload.data?.title ||
     payload.notification?.title ||
@@ -66,6 +72,11 @@ messaging.onBackgroundMessage((payload) => {
 });
 
 self.addEventListener('notificationclick', (event) => {
+  // ⚡ Les notifications nativement affichées par le SDK portent
+  // data.FCM_MSG : le SDK a SON propre handler notificationclick qui ouvre
+  // le lien fcmOptions — on ne fait rien ici (sinon double navigation).
+  if (event.notification.data && event.notification.data.FCM_MSG) return;
+
   event.notification.close();
 
   const url = event.notification.data?.url || 'admin.html';

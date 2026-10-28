@@ -1,9 +1,9 @@
 // ================================================================
 // SERVICE WORKER — ARVEXA Admin PWA
-// Version : 1.1.0
+// Version : 1.2.0
 // ================================================================
 
-const CACHE_VERSION = 'arvexa-admin-v1.1.0'; // v1.1 : FCM token réactivé + toast inscriptions + push notification payload + nettoyage tokens morts
+const CACHE_VERSION = 'arvexa-admin-v1.2.0'; // v1.2 : ANTI-DOUBLON — payload notification natif affiché une seule fois par le SDK (firebase-messaging-sw.js) // v1.1 : FCM token réactivé + toast inscriptions + push notification payload + nettoyage tokens morts
 const CACHE_SHELL = 'arvexa-admin-shell-v1';
 const CACHE_IMAGES = 'arvexa-admin-images-v1';
 const ALL_CACHES = [CACHE_SHELL, CACHE_IMAGES];
