@@ -221,6 +221,15 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
   let failureCount = 0;
   const CHUNK_SIZE = 500;
 
+  // ⚡ ANTI-DOUBLON — tag unique PAR ENVOI : tous les tokens d'un même
+  // envoi partagent le même webpush.notification.tag → si un appareil
+  // reçoit ce message via 2 tokens (2 comptes, ex: gagneavecia + compte
+  // fantôme gagneaveca, ou 2 origines app élève + console), la 2e
+  // notification REMPLACE silencieusement la 1ère au lieu de s'empiler.
+  // Les messages DISTINCTS (appels suivants) ont des tags différents
+  // et s'affichent normalement tous les deux.
+  const batchTag = 'arvexa-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+
   for (let i = 0; i < tokens.length; i += CHUNK_SIZE) {
     const chunk = tokens.slice(i, i + CHUNK_SIZE);
     let response;
@@ -228,8 +237,8 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
       response = await messaging.sendEachForMulticast({
         tokens: chunk,
         // ⚡ Payload `notification` : affichage natif fiable même navigateur
-        // fermé (Android). Les SW (admin + élève) affichent via
-        // onBackgroundMessage en lisant notification.title → aucun doublon.
+        // fermé (Android). Les SW ne ré-affichent PAS (garde anti-doublon
+        // v4.22/v1.2) et le tag ci-dessous écrase les doublons multi-tokens.
         notification: {
           title: title,
           body: body
@@ -244,7 +253,8 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
         webpush: {
           notification: {
             icon: ICON_URL,
-            badge: ICON_URL
+            badge: ICON_URL,
+            tag: batchTag
           },
           fcmOptions: { link: CLICK_ACTION_URL }
         }

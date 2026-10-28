@@ -1,5 +1,6 @@
 // ================================================================
 // FIREBASE MESSAGING SERVICE WORKER — ARVEXA Admin
+// Version : 1.2.0 (skipWaiting immédiat — anti-doublon)
 // ================================================================
 
 importScripts('https://www.gstatic.com/firebasejs/12.12.1/firebase-app-compat.js');
@@ -15,6 +16,20 @@ firebase.initializeApp({
 });
 
 const messaging = firebase.messaging();
+
+// ⚡ ANTI-DOUBLON — ACTIVATION IMMÉDIATE des mises à jour du SW :
+// sans skipWaiting, un onglet laissé ouvert gardait l'ANCIEN SW actif
+// et les correctifs déployés ne s'appliquaient jamais chez
+// l'utilisateur (doublons persistants). skipWaiting + clients.claim
+// activent le SW à jour instantanément, sans attendre la fermeture
+// de tous les onglets.
+self.addEventListener('install', () => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
 
 function getSafeNotificationUrl(value) {
   const fallback = new URL('admin.html', self.location.origin).href;
