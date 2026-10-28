@@ -2924,7 +2924,7 @@ function init() {
     if (!ready) toast('Chart.js non chargé', 'error');
     reloadAll();
     listenToLiveNotifications();
-    // registerAdminFcmToken(); // ⚡ DÉSACTIVÉ — sera déclenché manuellement
+    registerAdminFcmToken(); // ⚡ RÉACTIVÉ : sans token admin, aucun push inscription/demande ne peut arriver
   });
 }
     
@@ -4460,6 +4460,8 @@ function listenToLiveNotifications() {
 
         if (data.kind === 'subscription_request') {
           showLiveRequestToast(data);
+        } else if (data.kind === 'new_signup') {
+          showLiveSignupToast(data);
         }
       });
 
@@ -4538,6 +4540,54 @@ function debouncedReload() {
   if (_reloadTimer) clearTimeout(_reloadTimer);
   _reloadTimer = setTimeout(() => { reloadAll(); }, 2500);
 }
+
+// Toast visuel doré pour les NOUVELLES INSCRIPTIONS (temps réel)
+function showLiveSignupToast(data) {
+  const name = data.userName || 'Un élève';
+  const establishment = data.establishment || '';
+
+  const banner = document.createElement('div');
+  banner.className = 'live-notif-banner';
+  banner.innerHTML = `
+    <div class="live-notif-icon">🎉</div>
+    <div class="live-notif-content">
+      <div class="live-notif-title">Nouvelle inscription</div>
+      <div class="live-notif-body">
+        <strong>${esc(name)}</strong>${establishment ? ' · ' + esc(establishment) : ''}
+      </div>
+    </div>
+    <button class="live-notif-action" onclick="window.__gotoUsers()">Voir</button>
+    <button class="live-notif-close" aria-label="Fermer">
+      <i class="fas fa-times"></i>
+    </button>
+  `;
+
+  document.body.appendChild(banner);
+  requestAnimationFrame(() => banner.classList.add('show'));
+
+  banner.querySelector('.live-notif-close').addEventListener('click', () => {
+    banner.classList.remove('show');
+    setTimeout(() => banner.remove(), 300);
+  });
+
+  setTimeout(() => {
+    if (banner.parentNode) {
+      banner.classList.remove('show');
+      setTimeout(() => banner.remove(), 300);
+    }
+  }, 8000);
+
+  if (navigator.vibrate) {
+    try { navigator.vibrate([80, 40, 80]); } catch (e) {}
+  }
+
+  try { playNotifSound(); } catch (e) {}
+}
+
+// Bouton "Voir" du toast inscription → va sur Utilisateurs
+window.__gotoUsers = function () {
+  switchView('users');
+};
 
 // Bouton "Voir" du banner → va sur Abonnements filtré sur "En attente"
 window.__gotoPending = function () {

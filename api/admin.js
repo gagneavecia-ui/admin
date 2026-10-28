@@ -227,6 +227,13 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
     try {
       response = await messaging.sendEachForMulticast({
         tokens: chunk,
+        // ⚡ Payload `notification` : affichage natif fiable même navigateur
+        // fermé (Android). Les SW (admin + élève) affichent via
+        // onBackgroundMessage en lisant notification.title → aucun doublon.
+        notification: {
+          title: title,
+          body: body
+        },
         data: {
           title: title,
           body: body,
@@ -235,6 +242,10 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
           ...data
         },
         webpush: {
+          notification: {
+            icon: ICON_URL,
+            badge: ICON_URL
+          },
           fcmOptions: { link: CLICK_ACTION_URL }
         }
       });
@@ -264,6 +275,41 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
   return { successCount, failureCount, invalidTokens };
 }
 
+// ⚡ Supprime de Firestore les tokens rejetés par FCM (NotRegistered etc.)
+// ownerPairs : [{ token, uid }] — évite l'accumulation de tokens morts qui
+// gonflait pushFailed et empêchait la remise des notifications.
+async function removeInvalidTokens(ownerPairs, invalidTokens) {
+  if (!Array.isArray(invalidTokens) || invalidTokens.length === 0) return;
+  const { db, FieldValue } = getAdminServices();
+  const invalidSet = new Set(invalidTokens);
+  const byUid = new Map();
+  (ownerPairs || []).forEach(({ token, uid }) => {
+    if (!uid || !invalidSet.has(token)) return;
+    if (!byUid.has(uid)) byUid.set(uid, new Set());
+    byUid.get(uid).add(token);
+  });
+  for (const [uid, badSet] of byUid) {
+    try {
+      const userRef = db.collection('users').doc(uid);
+      const snap = await userRef.get();
+      if (!snap.exists) continue;
+      const data = snap.data() || {};
+      const all = new Set();
+      if (Array.isArray(data.fcmTokens)) {
+        data.fcmTokens.forEach((t) => { if (typeof t === 'string' && t.length > 20) all.add(t); });
+      }
+      if (typeof data.fcmToken === 'string' && data.fcmToken.length > 20) all.add(data.fcmToken);
+      const remaining = [...all].filter((t) => !badSet.has(t));
+      await userRef.update({
+        fcmTokens: remaining.length > 0 ? remaining : FieldValue.delete(),
+        fcmToken: remaining.length > 0 ? remaining[0] : FieldValue.delete()
+      });
+    } catch (e) {
+      console.warn('[FCM] Nettoyage tokens échoué pour', uid, ':', e.message);
+    }
+  }
+}
+
 async function notifyAdmins({ title, body, type = 'info', data = {} }) {
   const { db } = getAdminServices();
   const usersSnap = await db.collection('users').get();
@@ -273,17 +319,18 @@ async function notifyAdmins({ title, body, type = 'info', data = {} }) {
     return u.role === 'admin' || ADMIN_EMAILS.includes(u.email);
   });
 
-  const tokens = [];
+  const pairs = [];
   adminDocs.forEach((docSnap) => {
-    getUserTokens(docSnap.data()).forEach((t) => tokens.push(t));
+    getUserTokens(docSnap.data()).forEach((t) => pairs.push({ token: t, uid: docSnap.id }));
   });
 
-  const uniqueTokens = [...new Set(tokens)];
+  const uniqueTokens = [...new Set(pairs.map((p) => p.token))];
   if (uniqueTokens.length === 0) {
     return { sent: 0, failed: 0 };
   }
 
   const result = await sendPushToUsers(uniqueTokens, { title, body, type, data });
+  await removeInvalidTokens(pairs, result.invalidTokens);
   return { sent: result.successCount, failed: result.failureCount, invalidTokens: result.invalidTokens };
 }
 
@@ -767,11 +814,12 @@ async function giftPremium({ uid, months = 1 }, adminCtx) {
   const tokens = getUserTokens(data);
   if (tokens.length > 0) {
     try {
-      await sendPushToUsers(tokens, {
+      const giftPush = await sendPushToUsers(tokens, {
         title: '🎁 Premium offert !',
         body: `Un administrateur t'a offert ${months} mois de Premium.`,
         type: 'success'
       });
+      await removeInvalidTokens(tokens.map((t) => ({ token: t, uid })), giftPush.invalidTokens);
     } catch (e) {}
   }
 
@@ -953,6 +1001,7 @@ async function sendNotification({ target, email, title, message, type }, adminCt
     const pushResult = await sendPushToUsers(uniqueTokens, { title, body: message, type });
     pushSent = pushResult.successCount;
     pushFailed = pushResult.failureCount;
+    await removeInvalidTokens(tokens, pushResult.invalidTokens);
   }
 
   await db.collection('admin_notifications').add({
