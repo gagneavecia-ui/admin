@@ -8,7 +8,13 @@ const MAX_REQUESTS_PER_WINDOW = 60;
 const requestLog = new Map();
 
 const CLICK_ACTION_URL = 'https://admin-89.vercel.app/admin.html';
-const ICON_URL = 'https://arvexaschool.vercel.app/icon.png';
+// ✅ v1.6 — BRANDING DES NOTIFICATIONS (choix propriétaire « Notif 4 » :
+// variante « A » & atome). L'ancien icon.png (« PRÉPARATION BAC », fond
+// chargé) s'affichait en carré blanc / « logo d'une autre app » sur Android :
+// le badge DOIT être monochrome blanc sur transparent, la grande icône (à
+// droite de la notification) porte la vraie marque ARVEXA.
+const NOTIF_ICON_URL = 'https://arvexaschool.vercel.app/notif-logo.png';   // grande icône (droite)
+const NOTIF_BADGE_URL = 'https://arvexaschool.vercel.app/notif-icon.png';  // badge mono blanc (gauche / barre d'état)
 
 // Origines autorisées
 const ALLOWED_ORIGINS = [
@@ -273,8 +279,8 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
         },
         webpush: {
           notification: {
-            icon: ICON_URL,
-            badge: ICON_URL,
+            icon: NOTIF_ICON_URL,
+            badge: NOTIF_BADGE_URL,
             tag: batchTag
           },
           fcmOptions: { link: CLICK_ACTION_URL }

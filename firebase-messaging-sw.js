@@ -70,8 +70,9 @@ messaging.onBackgroundMessage((payload) => {
 
   const notificationOptions = {
     body: notificationBody,
-    icon: 'https://arvexaschool.vercel.app/icon.png',
-    badge: 'https://arvexaschool.vercel.app/icon.png',
+    // ✅ v1.6 — badge monochrome blanc + grande icône variante 4 « A » & atome
+    icon: 'https://arvexaschool.vercel.app/notif-logo.png',
+    badge: 'https://arvexaschool.vercel.app/notif-icon.png',
     vibrate: [200, 100, 200],
     tag: 'arvexa-admin-notif-' + Date.now(),
     renotify: true,
