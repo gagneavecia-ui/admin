@@ -147,11 +147,23 @@ async function requireAdmin(request) {
 
 function isPremiumActive(u) {
   if (!u) return false;
+  // ⚡ Compte propriétaire : premium « fixe » → jamais compté dans les stats
+  if (isOwnerAdmin(u)) return false;
   const active = u.premium === true || u.isUnlocked === true || u.hasDeposited === true;
   if (!active) return false;
   const end = u.subscriptionEndDate?.toDate?.() ||
     (u.subscriptionEndDate?.seconds ? new Date(u.subscriptionEndDate.seconds * 1000) : null);
   return !end || end.getTime() > Date.now();
+}
+
+// ⚡ Propriétaire / admin : premium fixe offert — exclu du décompte Premium
+// (signal propriétaire : « mon email reste toujours premium, dans le panneau
+// premium on ne doit pas le compter — actuellement on a zéro »)
+function isOwnerAdmin(u) {
+  if (!u) return false;
+  if (u.role === 'admin') return true;
+  const email = String(u.email || '').toLowerCase();
+  return ADMIN_EMAILS.some((e) => e.toLowerCase() === email);
 }
 
 function toISO(v) {
@@ -401,6 +413,7 @@ async function getDashboard() {
   const users = usersSnap.docs.map(serializeUser);
 
   const totalUsers = users.length;
+  // ⚡ Premium « fixe » du propriétaire exclu (comptage = élèves payants réels)
   const premiumUsers = users.filter((u) => isPremiumActive(u)).length;
   const pendingRequests = users.filter((u) => u.subscriptionStatus === 'pending');
   const pendingSubscriptions = pendingRequests.length;
@@ -412,8 +425,27 @@ async function getDashboard() {
     return created && created > oneWeekAgo;
   }).length;
 
+  // ⚡ Actifs aujourd'hui : doc analytics_daily/{today} OU dailyActivity/{today}
+  // (analytics_daily = tracker vues/durée client ; dailyActivity = sections/minutes serveur)
+  const today = new Date().toISOString().slice(0, 10);
+  const students = users.filter((u) => !isOwnerAdmin(u));
+  const chunks = [];
+  for (let i = 0; i < students.length; i += 10) chunks.push(students.slice(i, i + 10));
+  let activeToday = 0;
+  for (const chunk of chunks) {
+    await Promise.all(chunk.map(async (u) => {
+      try {
+        const [a, d] = await Promise.all([
+          db.collection('users').doc(u.uid).collection('analytics_daily').doc(today).get(),
+          db.collection('users').doc(u.uid).collection('dailyActivity').doc(today).get()
+        ]);
+        if (a.exists || d.exists) activeToday++;
+      } catch (e) { /* best-effort */ }
+    }));
+  }
+
   return {
-    stats: { totalUsers, premiumUsers, pendingSubscriptions, blockedUsers, newThisWeek },
+    stats: { totalUsers, premiumUsers, pendingSubscriptions, blockedUsers, newThisWeek, activeToday },
     pendingRequests: pendingRequests.slice(0, 10)
   };
 }
@@ -424,7 +456,7 @@ async function getStats() {
   const users = usersSnap.docs.map(serializeUser);
 
   const totalUsers = users.length;
-  const premiumUsers = users.filter((u) => isPremiumActive(u)).length;
+  const premiumUsers = users.filter((u) => isPremiumActive(u)).length; // exclut le propriétaire (isPremiumActive)
   const blockedUsers = users.filter((u) => u.accountStatus === 'blocked').length;
 
   const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -474,6 +506,8 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
     totalViews: 0,
     totalTime: 0,
     totalSessions: 0,
+    totalSections: 0,
+    totalStudyMin: 0,
     uniqueUsers: 0,
     avgTimePerUser: 0,
     mostActiveDay: null,
@@ -508,20 +542,41 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
               return docDate >= startDate && docDate <= endDate;
             });
 
-          return { userDoc, dailyDocs };
+          // ⚡ dailyActivity — sections créées/étudiées + minutes d'étude (serveur, api/progress.js)
+          // docId = date UTC « YYYY-MM-DD » → filtre par période
+          let activityDocs = [];
+          try {
+            const actSnap = await db
+              .collection('users').doc(userDoc.id)
+              .collection('dailyActivity')
+              .get();
+            activityDocs = actSnap.docs
+              .map((d) => ({ date: d.id, ...d.data() }))
+              .filter((a) => a.date >= startDate && a.date <= endDate);
+          } catch (e2) { /* best-effort */ }
+
+          return { userDoc, dailyDocs, activityDocs };
         } catch (e) {
           console.warn(`[ANALYTICS] Erreur lecture pour ${userDoc.id}:`, e.message);
-          return { userDoc, dailyDocs: [] };
+          return { userDoc, dailyDocs: [], activityDocs: [] };
         }
       })
     );
 
     // ⚡ Agréger (corrigé pour gérer les champs plats ET les objets imbriqués)
-    results.forEach(({ userDoc, dailyDocs }) => {
+    results.forEach(({ userDoc, dailyDocs, activityDocs }) => {
       const userData = userDoc.data();
       let userTime = 0;
       let userViews = 0;
       let userSessions = 0;
+      let userSections = 0;
+      let userStudyMin = 0;
+
+      // ⚡ SECTIONS + MINUTES D'ÉTUDE (dailyActivity, écrit serveur — fiable)
+      (activityDocs || []).forEach((a) => {
+        userSections += Number(a.sectionsCreated) || 0;
+        userStudyMin += Number(a.studyMinutes) || 0;
+      });
 
       dailyDocs.forEach((daily) => {
         // ⚡ PAGES — lire les 2 formats
@@ -580,18 +635,24 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
         userSessions += Number(daily.sessions) || 0;
       });
 
-      if (userTime > 0 || userViews > 0) {
+      if (userTime > 0 || userViews > 0 || userSections > 0 || userStudyMin > 0) {
         topUsers.push({
           uid: userDoc.id,
-          name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Utilisateur',
+          name: String(userData.fullName || '').trim()
+            || `${userData.firstName || ''} ${userData.lastName || ''}`.trim()
+            || 'Utilisateur',
           email: userData.email || '',
           totalTime: userTime,
           views: userViews,
-          sessions: userSessions
+          sessions: userSessions,
+          sections: userSections,
+          studyMin: userStudyMin
         });
         summary.totalTime += userTime;
         summary.totalViews += userViews;
         summary.totalSessions += userSessions;
+        summary.totalSections += userSections;
+        summary.totalStudyMin += userStudyMin;
         summary.uniqueUsers++;
       }
     });

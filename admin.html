@@ -2573,6 +2573,8 @@ const fullName = (d) => {
 
 const isPremium = (d) => {
   if (!d) return false;
+  // ⚡ Propriétaire : premium « fixe » offert → jamais compté dans le panneau Premium
+  if (d.role === 'admin' || ADMIN_EMAILS.includes(d.email)) return false;
   const has = d.premium === true || d.isUnlocked === true || d.hasDeposited === true;
   if (!has) return false;
   const end = toDate(d.subscriptionEndDate);
@@ -3200,6 +3202,11 @@ function loadDashboard() {
       <div class="card-label"><i class="fas fa-users"></i> Utilisateurs</div>
       <div class="card-value">${s.totalUsers || 0}</div>
       <div class="card-sub">${s.newThisWeek ? '+' + s.newThisWeek + ' cette semaine' : 'Aucun nouveau'}</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-bolt"></i> Actifs aujourd'hui</div>
+      <div class="card-value ${s.activeToday > 0 ? 'gold' : ''}">${s.activeToday || 0}</div>
+      <div class="card-sub">Élèves connectés/studiés ce jour</div>
     </div>
     <div class="card">
       <div class="card-label"><i class="fas fa-crown"></i> Premium</div>
@@ -4887,6 +4894,11 @@ function renderAnalytics(data) {
       <div class="card-sub">${s.totalSessions || 0} sessions</div>
     </div>
     <div class="card">
+      <div class="card-label"><i class="fas fa-layer-group"></i> Sections</div>
+      <div class="card-value">${s.totalSections || 0}</div>
+      <div class="card-sub">${formatDuration((s.totalStudyMin || 0) * 60)} d'étude</div>
+    </div>
+    <div class="card">
       <div class="card-label"><i class="fas fa-chart-line"></i> Moyenne / élève</div>
       <div class="card-value">${formatDuration(s.avgTimePerUser || 0)}</div>
       <div class="card-sub">Sur la période</div>
@@ -5161,7 +5173,7 @@ function renderTopUsers(users) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>#</th><th>Élève</th><th>Temps</th><th>Vues</th><th>Sessions</th><th></th></tr>
+          <tr><th>#</th><th>Élève</th><th>Temps</th><th>Vues</th><th>Sections</th><th>Sessions</th><th></th></tr>
         </thead>
         <tbody>
           ${users.slice(0, 20).map((u, i) => `
@@ -5173,6 +5185,7 @@ function renderTopUsers(users) {
               </td>
               <td data-label="Temps"><strong style="color:var(--gold)">${formatDuration(u.totalTime || 0)}</strong></td>
               <td data-label="Vues">${u.views || 0}</td>
+              <td data-label="Sections">${u.sections || 0}${u.studyMin ? ` <span class="sub" style="margin-left:4px">(${u.studyMin} min)</span>` : ''}</td>
               <td data-label="Sessions">${u.sessions || 0}</td>
               <td data-label="">
                 <button class="btn btn-secondary btn-sm" onclick="window.__openUser('${u.uid}')">
