@@ -1943,6 +1943,9 @@
         <button class="nav-btn" data-view="users">
           <i class="fas fa-users"></i> Utilisateurs
         </button>
+        <button class="nav-btn" data-view="resets">
+          <i class="fas fa-key"></i> Codes reset
+        </button>
         <button class="nav-btn" data-view="avis">
           <i class="fas fa-star"></i> Avis
         </button>
@@ -2189,6 +2192,24 @@
             </div>
           </div>
         </section>
+        <section class="view" id="view-resets">
+          <div class="page-head">
+            <h1>🔑 Codes de réinitialisation</h1>
+            <p>Filet de sécurité : si un élève ne reçoit pas son email (spam, boîte pleine, faute de frappe), son code apparaît ici — transmets-le-lui par WhatsApp en 1 clic.</p>
+          </div>
+
+          <div class="block">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+              <span style="font-size:12px;color:var(--muted)">20 dernières demandes · le code est valable 10 min</span>
+              <button class="btn btn-secondary btn-sm" onclick="loadResets()">
+                <i class="fas fa-rotate"></i> Actualiser
+              </button>
+            </div>
+            <div id="resetsList">
+              <div class="loading"><div class="spinner"></div><span>Chargement...</span></div>
+            </div>
+          </div>
+        </section>
 
         <!-- ========== LOGS ========== -->
         <section class="view" id="view-logs">
@@ -2334,6 +2355,10 @@
       <button class="bnav" data-view="users">
         <i class="fas fa-users"></i>
         <span>Users</span>
+      </button>
+      <button class="bnav" data-view="resets">
+        <i class="fas fa-key"></i>
+        <span>Codes</span>
       </button>
       <button class="bnav" id="moreBtn">
         <i class="fas fa-bars"></i>
@@ -3044,6 +3069,7 @@ function switchView(view) {
   if (view === 'avis') loadAvis();
   if (view === 'promo') loadPromos();
   if (view === 'moderation') loadBanned();
+  if (view === 'resets') loadResets();
   if (view === 'logs') loadLogs();
   if (view === 'notifications') loadNotifHistory();
   if (view === 'settings') loadMaintenanceStatus();
@@ -4327,6 +4353,60 @@ window.__unban = async function (uid) {
     loadBanned();
   } catch (e) {
     toast('Erreur : ' + e.message, 'error');
+  }
+};
+
+// ================================================================
+// CODES DE RÉINITIALISATION — filet de sécurité 100 % fiable
+// ================================================================
+async function loadResets() {
+  $('resetsList').innerHTML = `<div class="loading"><div class="spinner"></div><span>Chargement...</span></div>`;
+  try {
+    const data = await callApi('getPasswordResets');
+    state.resets = data.requests || [];
+    if (state.resets.length === 0) {
+      $('resetsList').innerHTML = `<div class="empty"><i class="fas fa-inbox"></i><strong>Aucune demande</strong><span>Les demandes de réinitialisation apparaîtront ici.</span></div>`;
+      return;
+    }
+    $('resetsList').innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">${state.resets.map((r, idx) => {
+      const live = !r.expired && r.code;
+      const mins = Math.max(0, Math.ceil((r.secondsLeft || 0) / 60));
+      const name = [r.firstName, r.lastName].filter(Boolean).join(' ') || esc(r.email);
+      const wa = r.whatsapp ? String(r.whatsapp).replace(/[^0-9]/g, '') : '';
+      const waMsg = encodeURIComponent(`Bonjour ${name} ! Ton code de réinitialisation ARVEXA est : ${r.code || '-'}. Il expire dans ${mins} minute(s). — ARVEXA School`);
+      return `
+        <div class="log-item" style="flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px;min-width:200px;flex:1">
+            <div style="font-size:20px;width:34px;height:34px;border-radius:10px;background:rgba(224,184,74,.1);display:flex;align-items:center;justify-content:center;color:var(--gold);flex-shrink:0"><i class="fas fa-key"></i></div>
+            <div style="min-width:0">
+              <div style="font-weight:700;font-size:13px">${esc(r.email)}</div>
+              <div style="font-size:11.5px;color:var(--muted)">${name} · demandé ${fmtRel(r.createdAt)} · ${r.attempts} tentative(s)</div>
+            </div>
+          </div>
+          <div style="font-family:monospace;font-size:22px;font-weight:800;letter-spacing:4px;color:${live ? 'var(--gold)' : 'var(--muted)'};text-decoration:${live ? 'none' : 'line-through'}">${r.code ? esc(r.code) : '—'}</div>
+          <div style="font-size:11px;color:${live ? 'var(--green)' : 'var(--muted)'};min-width:70px">${live ? `⏳ ${mins} min restantes` : 'Expiré'}</div>
+          <div style="display:flex;gap:6px">
+            ${r.code ? `<button class="btn btn-secondary btn-sm" onclick="window.__copyReset(${idx})" title="Copier le code"><i class="fas fa-copy"></i></button>` : ''}
+            ${wa && r.code ? `<a class="btn btn-sm" style="background:#25D366;color:#0A0A0A;font-weight:700" href="https://wa.me/${wa}?text=${waMsg}" target="_blank" rel="noopener" title="Envoyer par WhatsApp"><i class="fab fa-whatsapp"></i> Transmettre</a>` : ''}
+          </div>
+        </div>`;
+    }).join('')}</div>`;
+  } catch (e) {
+    $('resetsList').innerHTML = `<div class="empty"><i class="fas fa-info-circle"></i><strong>Indisponible</strong><span>${esc(e.message)}</span></div>`;
+  }
+}
+
+window.__copyReset = function (idx) {
+  const r = (state.resets || [])[idx];
+  if (!r || !r.code) return;
+  const done = () => toast('Code copié : ' + r.code, 'success');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(r.code).then(done).catch(() => {});
+  } else {
+    const t = document.createElement('textarea');
+    t.value = r.code; document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    document.body.removeChild(t);
   }
 };
 

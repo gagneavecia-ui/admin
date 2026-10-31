@@ -1253,6 +1253,52 @@ async function toggleMaintenance({ enabled }, adminCtx) {
     }
 
 // ────────────────────────────────────────────────────────────────
+// CODES DE RÉINITIALISATION (filet de sécurité 100 % fiable)
+// Chaque demande d'un élève apparaît ici avec le code en clair + son
+// numéro WhatsApp → le propriétaire transmet le code en 1 clic si
+// l'email n'arrive pas (spam, boîte pleine, faute de frappe…).
+// Les documents password_resets ne sont lisibles QUE par le SDK Admin.
+// ────────────────────────────────────────────────────────────────
+async function getPasswordResets() {
+  const { db } = getAdminServices();
+  const snap = await db.collection('password_resets')
+    .orderBy('createdAt', 'desc')
+    .limit(20)
+    .get();
+
+  const now = Date.now();
+  const requests = [];
+  for (const doc of snap.docs) {
+    const v = doc.data() || {};
+    const expiresMs = v.expiresAt ? new Date(v.expiresAt).getTime() : 0;
+
+    // Jointure : identité + WhatsApp de l'élève (users/{uid}.email == email)
+    let whatsapp = null, firstName = '', lastName = '';
+    try {
+      const uSnap = await db.collection('users').where('email', '==', doc.id).limit(1).get();
+      if (!uSnap.empty) {
+        const u = uSnap.docs[0].data() || {};
+        whatsapp = u.whatsapp || u.phone || u.subscriptionWhatsapp || null;
+        firstName = u.firstName || '';
+        lastName = u.lastName || '';
+      }
+    } catch (_) { /* jointure best-effort */ }
+
+    requests.push({
+      email: doc.id,
+      code: v.code || null,
+      firstName, lastName, whatsapp,
+      createdAt: toISO(v.createdAt),
+      expiresAt: toISO(v.expiresAt),
+      secondsLeft: expiresMs ? Math.max(0, Math.round((expiresMs - now) / 1000)) : 0,
+      expired: expiresMs ? expiresMs < now : true,
+      attempts: Number(v.attempts) || 0
+    });
+  }
+
+  return { success: true, requests, fetchedAt: new Date().toISOString() };
+}
+
 // HANDLER PRINCIPAL
 // ────────────────────────────────────────────────────────────────
 module.exports = async function handler(request, response) {
@@ -1345,6 +1391,8 @@ module.exports = async function handler(request, response) {
 
       case 'getBanned': return response.status(200).json(await getBanned());
       case 'unbanUser': return response.status(200).json(await unbanUser(body, adminContext));
+
+      case 'getPasswordResets': return response.status(200).json(await getPasswordResets());
 
       case 'toggleMaintenance': return response.status(200).json(await toggleMaintenance(body, adminContext));
 

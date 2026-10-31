@@ -3,7 +3,7 @@
 // Version : 1.3.0
 // ================================================================
 
-const CACHE_VERSION = 'arvexa-admin-v1.4.0'; // v1.4 : colonne Téléphone Utilisateurs (numéro WhatsApp de chaque élève) + notifs inscription/demande réparées (doc créé côté serveur : écriture client interdite par les règles) + bouton Vider le cache branché sur CLEAR_ADMIN_CACHE // v1.3 : ANTI-DOUBLON FINAL — tag unique par envoi (webpush.notification.tag) + firebase-messaging-sw.js v1.2 skipWaiting // v1.2 : ANTI-DOUBLON — payload notification natif affiché une seule fois par le SDK (firebase-messaging-sw.js) // v1.1 : FCM token réactivé + toast inscriptions + push notification payload + nettoyage tokens morts
+const CACHE_VERSION = 'arvexa-admin-v1.5.0'; // v1.5 : CARTE « CODES DE RÉINITIALISATION » — chaque demande d'un élève (email + code en clair + WhatsApp + temps restant) visible par le propriétaire, transmission WhatsApp en 1 clic (filet de sécurité si l'email part en spam) · v1.4 : colonne Téléphone Utilisateurs (numéro WhatsApp de chaque élève) + notifs inscription/demande réparées (doc créé côté serveur : écriture client interdite par les règles) + bouton Vider le cache branché sur CLEAR_ADMIN_CACHE // v1.3 : ANTI-DOUBLON FINAL — tag unique par envoi (webpush.notification.tag) + firebase-messaging-sw.js v1.2 skipWaiting // v1.2 : ANTI-DOUBLON — payload notification natif affiché une seule fois par le SDK (firebase-messaging-sw.js) // v1.1 : FCM token réactivé + toast inscriptions + push notification payload + nettoyage tokens morts
 const CACHE_SHELL = 'arvexa-admin-shell-v1';
 const CACHE_IMAGES = 'arvexa-admin-images-v1';
 const ALL_CACHES = [CACHE_SHELL, CACHE_IMAGES];
