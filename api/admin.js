@@ -8,13 +8,13 @@ const MAX_REQUESTS_PER_WINDOW = 60;
 const requestLog = new Map();
 
 const CLICK_ACTION_URL = 'https://admin-89.vercel.app/admin.html';
-// ✅ v1.6 — BRANDING DES NOTIFICATIONS (choix propriétaire « Notif 4 » :
-// variante « A » & atome). L'ancien icon.png (« PRÉPARATION BAC », fond
-// chargé) s'affichait en carré blanc / « logo d'une autre app » sur Android :
-// le badge DOIT être monochrome blanc sur transparent, la grande icône (à
-// droite de la notification) porte la vraie marque ARVEXA.
-const NOTIF_ICON_URL = 'https://arvexaschool.vercel.app/notif-logo.png';   // grande icône (droite)
-const NOTIF_BADGE_URL = 'https://arvexaschool.vercel.app/notif-icon.png';  // badge mono blanc (gauche / barre d'état)
+// ✅ v1.7 — BRANDING DES NOTIFICATIONS (choix propriétaire « Notif 4 ») :
+// badge MONOCHROME blanc sur transparent (obligation Android) = atome
+// variante 4 dans la barre d'état. AUCUNE grande icône (pas de champ
+// `icon`) : la bannière n'affiche que le logo de l'app (lanceur, à gauche)
+// + titre + message — retour propriétaire : « je ne veux pas que le logo
+// de droite s'affiche, uniquement celui de l'application ».
+const NOTIF_BADGE_URL = 'https://arvexaschool.vercel.app/notif-icon.png';
 
 // Origines autorisées
 const ALLOWED_ORIGINS = [
@@ -279,7 +279,7 @@ async function sendPushToUsers(tokens, { title, body, type, data = {} }) {
         },
         webpush: {
           notification: {
-            icon: NOTIF_ICON_URL,
+            // ✅ v1.7 — badge mono seulement (atome variante 4), pas de grande icône
             badge: NOTIF_BADGE_URL,
             tag: batchTag
           },
