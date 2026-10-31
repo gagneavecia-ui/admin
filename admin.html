@@ -496,6 +496,18 @@
       display: block;
       margin-top: 1px;
     }
+    tbody td .tel-link {
+      color: var(--gold, #D4AF37);
+      text-decoration: none;
+      font-size: 11.5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    tbody td .tel-link:hover { text-decoration: underline; }
+    tbody td .tel-link i { color: #25D366; font-size: 13px; }
 
     /* Mobile : rows en cards */
     @media (max-width: 768px) {
@@ -3485,10 +3497,14 @@ function renderSubs() {
   });
 
   if (search) {
-    list = list.filter((u) =>
-      (u.email || '').toLowerCase().includes(search) ||
-      fullName(u).toLowerCase().includes(search)
-    );
+    const searchDigits = search.replace(/\D/g, '');
+    list = list.filter((u) => {
+      const p = phoneOf(u);
+      return (u.email || '').toLowerCase().includes(search) ||
+        fullName(u).toLowerCase().includes(search) ||
+        p.raw.toLowerCase().includes(search) ||
+        (searchDigits.length >= 3 && p.digits.includes(searchDigits));
+    });
   }
 
   if (list.length === 0) {
@@ -3700,6 +3716,21 @@ window.__rejectSub = async function (uid) {
 // ================================================================
 // UTILISATEURS
 // ================================================================
+// ⚡ v1.4 — TÉLÉPHONE de l'élève (demande propriétaire) :
+// le champ n'était JAMAIS sérialisé par l'API → invisible ici.
+// Priorité : whatsapp (étape post-inscription du site) → phone →
+// subscriptionWhatsapp (numéro laissé dans une demande Premium).
+function phoneOf(u) {
+  const raw = String(u.whatsapp || u.phone || u.subscriptionWhatsapp || '').trim();
+  return { raw, digits: raw.replace(/[^\d]/g, '') };
+}
+
+function phoneCell(u) {
+  const p = phoneOf(u);
+  if (!p.raw) return '<span class="sub">\u2014</span>';
+  return '<a class="tel-link" href="https://wa.me/' + p.digits + '" target="_blank" rel="noopener" title="Ouvrir la conversation WhatsApp"><i class="fab fa-whatsapp"></i>' + esc(p.raw) + '</a>';
+}
+
 function renderUsers() {
   const search = ($('userSearch').value || '').toLowerCase().trim();
   const role = state.customSelects.userFilterRole?.getValue() || 'all';
@@ -3708,10 +3739,14 @@ function renderUsers() {
   let list = state.users;
 
   if (search) {
-    list = list.filter((u) =>
-      (u.email || '').toLowerCase().includes(search) ||
-      fullName(u).toLowerCase().includes(search)
-    );
+    const searchDigits = search.replace(/\D/g, '');
+    list = list.filter((u) => {
+      const p = phoneOf(u);
+      return (u.email || '').toLowerCase().includes(search) ||
+        fullName(u).toLowerCase().includes(search) ||
+        p.raw.toLowerCase().includes(search) ||
+        (searchDigits.length >= 3 && p.digits.includes(searchDigits));
+    });
   }
   if (role === 'admin') list = list.filter((u) => u.role === 'admin' || ADMIN_EMAILS.includes(u.email));
   if (role === 'student') list = list.filter((u) => u.role !== 'admin' && !ADMIN_EMAILS.includes(u.email));
@@ -3727,7 +3762,7 @@ function renderUsers() {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Utilisateur</th><th>Rôle</th><th>Statut</th><th>Inscrit</th><th></th></tr>
+          <tr><th>Utilisateur</th><th>Téléphone</th><th>Rôle</th><th>Statut</th><th>Inscrit</th><th></th></tr>
         </thead>
         <tbody>
           ${list.slice(0, 100).map((u) => {
@@ -3740,6 +3775,7 @@ function renderUsers() {
                   <strong>${esc(fullName(u))}</strong>
                   <span class="sub">${esc(u.email || '')}</span>
                 </td>
+                <td data-label="Téléphone">${phoneCell(u)}</td>
                 <td data-label="Rôle">${adm ? '<span class="badge gold">Admin</span>' : '<span class="badge gray">Étudiant</span>'}</td>
                 <td data-label="Statut">
                   ${blocked ? '<span class="badge red">Bloqué</span>' :
@@ -3808,6 +3844,10 @@ window.__openUser = function (uid) {
       <div class="m-item">
         <div class="m-item-label">Établissement</div>
         <div class="m-item-value">${esc(u.establishment || '—')}</div>
+      </div>
+      <div class="m-item">
+        <div class="m-item-label">Téléphone</div>
+        <div class="m-item-value">${u.whatsapp || u.phone || u.subscriptionWhatsapp ? '<a class="tel-link" href="https://wa.me/' + phoneOf(u).digits + '" target="_blank" rel="noopener"><i class="fab fa-whatsapp"></i> ' + esc(phoneOf(u).raw) + '</a>' : '—'}</div>
       </div>
       ${u.subscriptionEndDate ? `
         <div class="m-item full">
@@ -4364,6 +4404,13 @@ function bindSettings() {
     if (!ok) return;
     localStorage.removeItem('arvexa_session');
     localStorage.removeItem('arvexa_user_data');
+    // v1.4 audit : vider AUSSI les caches du service worker
+    // (le message CLEAR_ADMIN_CACHE existait mais n'était jamais envoyé)
+    try {
+      navigator.serviceWorker.getRegistration().then((reg) => {
+        if (reg && reg.active) reg.active.postMessage({ type: 'CLEAR_ADMIN_CACHE' });
+      });
+    } catch (e) {}
     toast('Cache vidé', 'info');
   });
 

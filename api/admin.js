@@ -166,6 +166,8 @@ function serializeUser(doc) {
     firstName: data.firstName || '',
     lastName: data.lastName || '',
     email: data.email || '',
+    whatsapp: data.whatsapp || data.phone || data.subscriptionWhatsapp || null,
+    phone: data.phone || null,
     establishment: data.establishment || '',
     classId: data.classId || '',
     profilePicture: data.profilePicture || null,
@@ -644,6 +646,31 @@ async function notifyNewSubscriptionRequest({ userUid, userName, plan, planLabel
     }
   });
 
+  // ⚡ v1.4 — NOTIF IN-APP FIABLE : les règles Firestore interdisent
+  // l'écriture client sur admin_notifications (allow write: false depuis
+  // l'audit sécurité) → l'ancien addDoc d'abonnement.html échouait en
+  // permission-denied et l'admin ne voyait plus AUCUNE notification.
+  // Le SDK admin passe au-dessus des règles : doc créé ici.
+  try {
+    const { db, FieldValue } = getAdminServices();
+    await db.collection('admin_notifications').add({
+      kind: 'subscription_request',
+      title,
+      message: body,
+      userUid: userUid || '',
+      userName: userName || '',
+      plan: plan || 'monthly',
+      planLabel: planLabel || (plan === 'annual' ? 'Annuel' : 'Mensuel'),
+      price: Number(price || 0),
+      requestId: requestId || '',
+      type: 'warning',
+      read: false,
+      createdAt: FieldValue.serverTimestamp()
+    });
+  } catch (docErr) {
+    console.error('doc admin_notifications (subscription_request):', docErr.message);
+  }
+
   return { ok: true, ...result };
 }
 
@@ -666,6 +693,26 @@ async function notifyNewSignup({ uid, userName, userEmail, establishment }) {
       userEmail: userEmail || ''
     }
   });
+
+  // ⚡ v1.4 — NOTIF IN-APP FIABLE (même cause que subscription_request :
+  // écriture client devenue interdite par les règles → doc créé côté serveur).
+  try {
+    const { db, FieldValue } = getAdminServices();
+    await db.collection('admin_notifications').add({
+      kind: 'new_signup',
+      title,
+      message: body,
+      userUid: uid || '',
+      userEmail: userEmail || '',
+      userName: userName || '',
+      establishment: establishment || '',
+      type: 'success',
+      read: false,
+      createdAt: FieldValue.serverTimestamp()
+    });
+  } catch (docErr) {
+    console.error('doc admin_notifications (new_signup):', docErr.message);
+  }
 
   return { ok: true, ...result };
 }
