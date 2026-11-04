@@ -2280,10 +2280,30 @@
 
   <div class="block">
     <div class="block-head">
+      <div class="block-title"><i class="fas fa-graduation-cap"></i> Matières les plus consultées</div>
+    </div>
+    <div id="topContentsList" style="margin-top:12px">
+      <div class="loading"><div class="spinner"></div><span>Chargement...</span></div>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
       <div class="block-title"><i class="fas fa-users"></i> Top utilisateurs</div>
       <span class="block-sub" id="topUsersSub">—</span>
     </div>
     <div id="topUsersList">
+      <div class="loading"><div class="spinner"></div><span>Chargement...</span></div>
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <div class="block-title" style="color:var(--warning)"><i class="fas fa-user-slash"></i> Élèves inactifs depuis 7 jours ou plus</div>
+      <span class="block-sub" id="inactiveSub">—</span>
+    </div>
+    <p style="font-size:12px;color:var(--text-dim);margin:-4px 0 10px">Élèves qui utilisaient ARVEXA et n'ont plus aucune activité récente — ouvre leur fiche pour comprendre (appareil, pages préférées, cadence) et relance-les par une notification.</p>
+    <div id="inactiveList">
       <div class="loading"><div class="spinner"></div><span>Chargement...</span></div>
     </div>
   </div>
@@ -3223,6 +3243,16 @@ function loadDashboard() {
       <div class="card-value ${s.blockedUsers > 0 ? 'red' : ''}">${s.blockedUsers || 0}</div>
       <div class="card-sub">Comptes désactivés</div>
     </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-calendar-check"></i> Actifs 7 jours</div>
+      <div class="card-value ${s.active7d > 0 ? 'gold' : ''}">${s.active7d || 0}</div>
+      <div class="card-sub">${s.minutes7d ? formatDuration((s.minutes7d || 0) * 60) + ' cumulées' : 'Sur la semaine'}</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-user-slash"></i> Inactifs 7 j et +</div>
+      <div class="card-value ${s.inactive7d > 0 ? 'red' : ''}">${s.inactive7d || 0}</div>
+      <div class="card-sub">${s.topSubject ? 'Top matière : ' + s.topSubject : 'À relancer'}</div>
+    </div>
   `;
 
   $('dashSub').textContent = `${s.totalUsers || 0} utilisateurs · ${s.premiumUsers || 0} premium`;
@@ -3890,6 +3920,10 @@ window.__openUser = function (uid) {
       ` : ''}
     </div>
 
+    <div id="userActivityBox" class="m-activity" style="margin-top:6px">
+      <div class="loading"><div class="spinner"></div><span>Chargement de l'activité...</span></div>
+    </div>
+
     <div class="m-actions">
       ${u.subscriptionStatus === 'pending' ? `
         <button class="btn btn-primary" onclick="window.__openPay('${u.id}'); window.__closeUserModal();">
@@ -3925,6 +3959,101 @@ window.__openUser = function (uid) {
 
   $('userModal').classList.add('show');
   document.body.style.overflow = 'hidden';
+
+  // ⚡ v1.9 — fiche d'engagement complète (async, sans bloquer la modale)
+  window.__loadUserActivity(uid);
+};
+
+// ⚡ v1.9 — FICHE D'ENGAGEMENT ÉLÈVE : tout ce qu'il faut savoir sur
+// son usage (temps, vues, sessions, appareil, pages préférées, matières,
+// résultats, inactivité) pour comprendre pourquoi il a arrêté.
+window.__loadUserActivity = async function (uid) {
+  const box = $('userActivityBox');
+  if (!box) return;
+  try {
+    const d = await callApi('getUserDetail', { uid });
+    if (!$('userModal').classList.contains('show')) return; // modale fermée entre-temps
+    const en = d.engagement || {};
+    const st = d.study || {};
+    const inactif = en.lastSeenDaysAgo != null && en.lastSeenDaysAgo >= 7;
+
+    const barres = (items, iconFn) => {
+      if (!items || !items.length) return '<div class="empty" style="padding:10px">Aucune donnée</div>';
+      const max = items[0].count;
+      return items.map((it) => `
+        <div class="log-item">
+          <div class="log-item-action">
+            <i class="fas ${iconFn ? iconFn(it.key) : 'fa-circle'}"></i>
+            <div style="min-width:0;flex:1">
+              <div style="font-size:12px;color:var(--text);font-weight:500">${esc(it.key)}</div>
+              <div class="progress-bar" style="margin:3px 0 0;height:4px"><span style="width:${Math.round((it.count / max) * 100)}%"></span></div>
+            </div>
+          </div>
+          <span class="log-item-time">${it.count}</span>
+        </div>`).join('');
+    };
+
+    // 30 derniers jours (mini barres CSS)
+    const days = [];
+    const now = Date.now();
+    for (let i = 29; i >= 0; i--) {
+      const dt = new Date(now - i * 86400000).toISOString().slice(0, 10);
+      days.push({ date: dt, min: Math.round(((d.byDate || {})[dt] || 0) / 60) });
+    }
+    const maxMin = Math.max(1, ...days.map((x) => x.min));
+    const miniChart = `<div style="display:flex;align-items:flex-end;gap:2px;height:56px;margin:8px 0 2px">${days.map((x) => `<div title="${x.date} · ${x.min} min" style="flex:1;background:${x.min ? 'linear-gradient(180deg,var(--gold),var(--accent))' : 'rgba(128,128,128,0.15)'};border-radius:2px;height:${Math.max(4, Math.round((x.min / maxMin) * 56))}px"></div>`).join('')}</div>`;
+
+    const pageIcons = { index: 'fa-house', matiere: 'fa-book-open', chapitre: 'fa-folder-open', lecture: 'fa-book', exam: 'fa-file-pen', reviseur: 'fa-wand-magic-sparkles', profil: 'fa-user', groupe: 'fa-comments', planificateur: 'fa-calendar-days', calculatrice: 'fa-calculator', outils: 'fa-toolbox', abonnement: 'fa-crown', notifications: 'fa-bell', localisation: 'fa-location-dot', diagnostic: 'fa-stethoscope' };
+    const featIcons = { mode_examen: 'fa-file-pen', reviseur: 'fa-wand-magic-sparkles', lecture: 'fa-book', calculatrice: 'fa-calculator', formulaire: 'fa-superscript', tableau_periodique: 'fa-flask-vial', groupe: 'fa-comments', planificateur: 'fa-calendar-days', arv_pilot: 'fa-robot' };
+
+    const resultRows = (d.results || []).length ? (d.results || []).map((r) => {
+      const pct = r.total ? Math.round((r.score / r.total) * 100) : null;
+      const kindLabel = r.kind === 'exam' ? 'Examen' : r.kind === 'revision' ? 'Révision' : r.kind;
+      return `<div class="log-item">
+        <div class="log-item-action">
+          <i class="fas ${r.kind === 'exam' ? 'fa-file-pen' : 'fa-wand-magic-sparkles'}"></i>
+          <div style="font-size:12px;color:var(--text)">${esc(kindLabel)}${r.subject ? ' · ' + esc(r.subject) : ''} <span class="sub">${esc(r.date || '')}</span></div>
+        </div>
+        <span class="log-item-time" style="color:${pct == null ? 'var(--text-dim)' : pct >= 70 ? 'var(--green)' : pct >= 50 ? 'var(--gold)' : 'var(--red)'}">${r.score}/${r.total || '?'}${pct != null ? ' (' + pct + '%)' : ''}</span>
+      </div>`;
+      }).join('') : '<div class="empty" style="padding:10px">Aucun résultat enregistré</div>';
+
+    box.innerHTML = `
+      <div class="block-head" style="margin-top:2px">
+        <div class="block-title"><i class="fas fa-chart-simple"></i> Activité sur ARVEXA</div>
+        ${inactif ? `<span class="badge red">Inactif depuis ${en.lastSeenDaysAgo} j</span>` : (en.lastSeenDaysAgo === 0 ? '<span class="badge green">Actif aujourd\'hui</span>' : `<span class="badge gray">Vu il y a ${en.lastSeenDaysAgo ?? '?'} j</span>`)}
+      </div>
+      <div class="m-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="m-item"><div class="m-item-label">Temps total</div><div class="m-item-value" style="color:var(--gold)">${formatDuration(en.totalTime || 0)}</div></div>
+        <div class="m-item"><div class="m-item-label">Sessions</div><div class="m-item-value">${en.sessions || 0}</div></div>
+        <div class="m-item"><div class="m-item-label">Moy./session</div><div class="m-item-value">${en.avgSessionMin || 0} min</div></div>
+        <div class="m-item"><div class="m-item-label">Pages vues</div><div class="m-item-value">${en.views || 0}</div></div>
+        <div class="m-item"><div class="m-item-label">Jours actifs</div><div class="m-item-value">${en.daysActive || 0}</div></div>
+        <div class="m-item"><div class="m-item-label">Appareil</div><div class="m-item-value" style="font-size:13px">${en.device ? '<i class="fas fa-' + (en.device === 'mobile' ? 'mobile-screen' : en.device === 'tablet' ? 'tablet-screen-button' : 'desktop') + '"></i> ' + esc(en.device) : '—'}</div></div>
+        <div class="m-item"><div class="m-item-label">Sections créées</div><div class="m-item-value">${st.sectionsCreated || 0}</div></div>
+        <div class="m-item"><div class="m-item-label">Minutes d'étude</div><div class="m-item-value">${st.studyMinutes || 0}</div></div>
+        <div class="m-item"><div class="m-item-label">Première activité</div><div class="m-item-value" style="font-size:13px">${esc(en.firstSeen || '—')}</div></div>
+      </div>
+      <div class="m-item-label" style="margin:10px 0 0">Temps passé — 30 derniers jours</div>
+      ${miniChart}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px">
+        <div>
+          <div class="m-item-label">Pages préférées</div>
+          ${barres(d.topPages, (k) => pageIcons[k] || 'fa-file')}
+        </div>
+        <div>
+          <div class="m-item-label">Fonctionnalités utilisées</div>
+          ${barres(d.topFeatures, (k) => featIcons[k] || 'fa-circle')}
+        </div>
+      </div>
+      <div class="m-item-label" style="margin:10px 0 0">Matières consultées</div>
+      ${barres(d.topContents, () => 'fa-book-open')}
+      <div class="m-item-label" style="margin:10px 0 0">Derniers résultats (examen / révision)</div>
+      ${resultRows}
+    `;
+  } catch (e) {
+    if (box) box.innerHTML = `<div class="empty" style="padding:12px"><i class="fas fa-triangle-exclamation"></i> Activité indisponible : ${esc(e.message || 'erreur')}</div>`;
+  }
 };
 
 window.__closeUserModal = function () {
@@ -4936,6 +5065,14 @@ function renderAnalytics(data) {
   requestAnimationFrame(() => {
     try { renderTopUsers(data.topUsers || []); } catch (e) { console.error('renderTopUsers:', e); }
   });
+
+  requestAnimationFrame(() => {
+    try { renderTopContents(data.topContents || []); } catch (e) { console.error('renderTopContents:', e); }
+  });
+
+  requestAnimationFrame(() => {
+    try { renderInactive7(data.inactive7 || []); } catch (e) { console.error('renderInactive7:', e); }
+  });
     }
 
 function renderTopPages(pages) {
@@ -5160,6 +5297,55 @@ function renderTimeSpentChart(data) {
   });
 }
 
+// ⚡ v1.9 — Matières les plus consultées
+function renderTopContents(contents) {
+  if (!contents.length) {
+    $('topContentsList').innerHTML = '<div class="empty">Aucune donnée</div>';
+    return;
+  }
+  const max = contents[0].count;
+  const icons = { mathematiques: 'fa-square-root-variable', physique: 'fa-atom', chimie: 'fa-flask', svt: 'fa-dna', philosophie: 'fa-brain', histoire: 'fa-landmark', geographie: 'fa-earth-africa', francais: 'fa-book' };
+  $('topContentsList').innerHTML = contents.map((c) => `
+    <div class="log-item">
+      <div class="log-item-action">
+        <i class="fas ${icons[c.subject] || 'fa-book'}"></i>
+        <div style="min-width:0;flex:1">
+          <div style="font-size:12.5px;color:var(--text);font-weight:500;text-transform:capitalize">${esc(c.subject)}</div>
+          <div class="progress-bar" style="margin:4px 0 0;height:4px"><span style="width:${Math.round((c.count / max) * 100)}%"></span></div>
+        </div>
+      </div>
+      <span class="log-item-time">${c.count}</span>
+    </div>`).join('');
+}
+
+// ⚡ v1.9 — Élèves inactifs depuis 7 jours ou plus (pourquoi il a arrêté)
+function renderInactive7(list) {
+  if (!list.length) {
+    $('inactiveList').innerHTML = '<div class="empty"><i class="fas fa-check-circle"></i><strong>Tous les élèves actifs sont revenus</strong><span>Aucun élève inactif depuis 7 jours.</span></div>';
+    $('inactiveSub').textContent = '0 élève';
+    return;
+  }
+  $('inactiveSub').textContent = `${list.length} élève(s) à relancer`;
+  $('inactiveList').innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Élève</th><th>Dernière activité</th><th>Temps total</th><th>Moy./session</th><th>Appareil</th><th>Matière préférée</th><th></th></tr></thead>
+        <tbody>
+          ${list.map((u) => `
+            <tr>
+              <td data-label="Élève"><strong>${esc(u.name || 'Utilisateur')}</strong><span class="sub">${esc(u.email || '')}</span></td>
+              <td data-label="Dernière activité"><span class="badge red">il y a ${u.days} j</span><span class="sub" style="display:block">${esc(u.lastSeen || '')}</span></td>
+              <td data-label="Temps total">${formatDuration(u.totalTime || 0)}</td>
+              <td data-label="Moy./session">${u.avgSessionMin || 0} min</td>
+              <td data-label="Appareil">${u.device ? '<i class="fas fa-' + (u.device === 'mobile' ? 'mobile-screen' : u.device === 'tablet' ? 'tablet-screen-button' : 'desktop') + '"></i> ' + esc(u.device) : '—'}</td>
+              <td data-label="Matière préférée" style="text-transform:capitalize">${esc(u.topContent || '—')}</td>
+              <td data-label=""><button class="btn btn-secondary btn-sm" onclick="window.__openUser('${u.uid}')"><i class="fas fa-eye"></i></button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
 function renderTopUsers(users) {
   if (!users.length) {
     $('topUsersList').innerHTML = '<div class="empty"><i class="fas fa-users"></i><strong>Aucune donnée</strong></div>';
@@ -5182,6 +5368,7 @@ function renderTopUsers(users) {
               <td data-label="Élève">
                 <strong>${esc(u.name || 'Utilisateur')}</strong>
                 <span class="sub">${esc(u.email || '')}</span>
+                ${u.lastSeenDaysAgo != null ? `<span class="sub">Dernière activité : ${u.lastSeenDaysAgo === 0 ? "aujourd'hui" : 'il y a ' + u.lastSeenDaysAgo + ' j'}${u.device ? ' · ' + esc(u.device) : ''}${u.topContent ? ' · ' + esc(u.topContent) : ''}</span>` : ''}
               </td>
               <td data-label="Temps"><strong style="color:var(--gold)">${formatDuration(u.totalTime || 0)}</strong></td>
               <td data-label="Vues">${u.views || 0}</td>

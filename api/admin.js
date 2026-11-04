@@ -425,27 +425,66 @@ async function getDashboard() {
     return created && created > oneWeekAgo;
   }).length;
 
-  // ⚡ Actifs aujourd'hui : doc analytics_daily/{today} OU dailyActivity/{today}
-  // (analytics_daily = tracker vues/durée client ; dailyActivity = sections/minutes serveur)
+  // ⚡ v1.9 — ENGAGEMENT 7 JOURS : une seule lecture analytics_daily par élève
+  // (au lieu de 2 docs) → activeToday, active7d, inactive7d, topSubject.
   const today = new Date().toISOString().slice(0, 10);
+  const d7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const students = users.filter((u) => !isOwnerAdmin(u));
   const chunks = [];
   for (let i = 0; i < students.length; i += 10) chunks.push(students.slice(i, i + 10));
   let activeToday = 0;
+  let active7d = 0;
+  let inactive7d = 0;
+  let minutes7d = 0;
+  const subjectCount7d = {};
+
   for (const chunk of chunks) {
     await Promise.all(chunk.map(async (u) => {
       try {
-        const [a, d] = await Promise.all([
-          db.collection('users').doc(u.uid).collection('analytics_daily').doc(today).get(),
-          db.collection('users').doc(u.uid).collection('dailyActivity').doc(today).get()
-        ]);
-        if (a.exists || d.exists) activeToday++;
+        const dailySnap = await db.collection('users').doc(u.uid).collection('analytics_daily').get();
+        let seenToday = false;
+        let seen7d = false;
+        let hasHistory = false;
+        dailySnap.docs.forEach((docu) => {
+          const data = docu.data() || {};
+          const date = String(data.date || docu.id || '');
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+          hasHistory = true;
+          if (date === today) seenToday = true;
+          if (date >= d7) {
+            seen7d = true;
+            minutes7d += Math.round((Number(data.totalTime) || 0) / 60);
+            const contents = { ...(data.contents || {}) };
+            Object.entries(data).forEach(([k, v]) => {
+              if (k.startsWith('contents.')) contents[k.replace('contents.', '')] = v;
+            });
+            Object.entries(contents).forEach(([k, v]) => {
+              subjectCount7d[k] = (subjectCount7d[k] || 0) + Number(v || 0);
+            });
+          }
+        });
+        // repli : activité serveur du jour (sections / minutes d'étude)
+        if (!seenToday) {
+          try {
+            const actDoc = await db.collection('users').doc(u.uid).collection('dailyActivity').doc(today).get();
+            if (actDoc.exists) seenToday = true;
+          } catch (e2) { /* best-effort */ }
+        }
+        if (seenToday) activeToday++;
+        if (seen7d) active7d++;
+        else if (hasHistory) inactive7d++; // avait de l'historique, plus rien depuis ≥ 7 j
       } catch (e) { /* best-effort */ }
     }));
   }
 
+  const topSubjectEntry = Object.entries(subjectCount7d).sort((a, b) => b[1] - a[1])[0];
+  const topSubject = topSubjectEntry ? topSubjectEntry[0].replace(/^subject_/, '') : null;
+
   return {
-    stats: { totalUsers, premiumUsers, pendingSubscriptions, blockedUsers, newThisWeek, activeToday },
+    stats: {
+      totalUsers, premiumUsers, pendingSubscriptions, blockedUsers, newThisWeek,
+      activeToday, active7d, inactive7d, minutes7d, topSubject
+    },
     pendingRequests: pendingRequests.slice(0, 10)
   };
 }
@@ -516,10 +555,14 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
 
   const topPagesMap = {};
   const topFeaturesMap = {};
+  const topContentsMap = {};
   const byTimeOfDay = { matin: 0, apresmidi: 0, soir: 0, nuit: 0 };
   const byDayOfWeek = { lundi: 0, mardi: 0, mercredi: 0, jeudi: 0, vendredi: 0, samedi: 0, dimanche: 0 };
   const byDate = {};
   const topUsers = [];
+  const inactive7 = [];
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const d7Str = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   // 3) Parcourir les utilisateurs en chunks
   const chunkSize = 10;
@@ -571,6 +614,11 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
       let userSessions = 0;
       let userSections = 0;
       let userStudyMin = 0;
+      // ⚡ v1.9 — profil d'engagement par élève
+      let userLastDate = null;
+      let userDaysActive = 0;
+      let userDevice = null;
+      const userContents = {};
 
       // ⚡ SECTIONS + MINUTES D'ÉTUDE (dailyActivity, écrit serveur — fiable)
       (activityDocs || []).forEach((a) => {
@@ -625,6 +673,23 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
           byDayOfWeek[k] = (byDayOfWeek[k] || 0) + Number(v || 0);
         });
 
+        // ⚡ CONTENTS (matières vues)
+        const contents = { ...(daily.contents || {}) };
+        Object.entries(daily).forEach(([key, value]) => {
+          if (key.startsWith('contents.')) {
+            contents[key.replace('contents.', '')] = value;
+          }
+        });
+        Object.entries(contents).forEach(([k, v]) => {
+          topContentsMap[k] = (topContentsMap[k] || 0) + Number(v || 0);
+          userContents[k] = (userContents[k] || 0) + Number(v || 0);
+        });
+
+        // ⚡ PROFIL : dernière date active + appareil + jours actifs
+        if (daily.date && (!userLastDate || String(daily.date) > userLastDate)) userLastDate = String(daily.date);
+        if (daily.device) userDevice = daily.device;
+        userDaysActive++;
+
         // ⚡ DATE
         if (daily.date) {
           byDate[daily.date] = (byDate[daily.date] || 0) + (Number(daily.totalTime) || 0);
@@ -636,6 +701,7 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
       });
 
       if (userTime > 0 || userViews > 0 || userSections > 0 || userStudyMin > 0) {
+        const topUserContent = Object.entries(userContents).sort((a, b) => b[1] - a[1])[0];
         topUsers.push({
           uid: userDoc.id,
           name: String(userData.fullName || '').trim()
@@ -646,7 +712,14 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
           views: userViews,
           sessions: userSessions,
           sections: userSections,
-          studyMin: userStudyMin
+          studyMin: userStudyMin,
+          lastSeen: userLastDate,
+          daysActive: userDaysActive,
+          device: userDevice || null,
+          topContent: topUserContent ? topUserContent[0].replace(/^subject_/, '') : null,
+          lastSeenDaysAgo: userLastDate
+            ? Math.max(0, Math.round((Date.now() - new Date(userLastDate + 'T12:00:00Z').getTime()) / 86400000))
+            : null
         });
         summary.totalTime += userTime;
         summary.totalViews += userViews;
@@ -675,6 +748,31 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
 
   topUsers.sort((a, b) => b.totalTime - a.totalTime);
 
+  // ⚡ v1.9 — ÉLÈVES À RISQUE : avaient une activité, plus rien depuis ≥ 7 j.
+  // Indicateurs de « pourquoi il a arrêté » : dernière activité, cadence,
+  // durée moyenne/session, pages préférées, appareil.
+  topUsers.forEach((u) => {
+    if (u.lastSeenDaysAgo != null && u.lastSeenDaysAgo >= 7) {
+      inactive7.push({
+        uid: u.uid, name: u.name, email: u.email,
+        lastSeen: u.lastSeen,
+        days: u.lastSeenDaysAgo,
+        totalTime: u.totalTime,
+        views: u.views,
+        sessions: u.sessions,
+        avgSessionMin: u.sessions ? Math.round(u.totalTime / 60 / u.sessions) : 0,
+        device: u.device,
+        topContent: u.topContent
+      });
+    }
+  });
+  inactive7.sort((a, b) => b.days - a.days);
+
+  const topContents = Object.entries(topContentsMap)
+    .map(([key, count]) => ({ subject: String(key).replace(/^subject_/, ''), count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+
   const daysSorted = Object.entries(byDate).sort((a, b) => b[1] - a[1]);
   if (daysSorted.length > 0) {
     summary.mostActiveDay = daysSorted[0][0];
@@ -688,10 +786,121 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
     summary,
     topPages,
     topFeatures,
+    topContents,
     byTimeOfDay,
     byDayOfWeek,
     byDate,
-    topUsers: topUsers.slice(0, 20)
+    topUsers: topUsers.slice(0, 20),
+    inactive7: inactive7.slice(0, 20)
+  };
+}
+
+// ────────────────────────────────────────────────────────────────
+// ⚡ v1.9 — FICHE ENGAGEMENT COMPLÈTE D'UN ÉLÈVE (getUserDetail)
+// Répond aux questions du propriétaire : pourquoi cet élève a arrêté,
+// qu'est-ce qu'il utilisait le plus, quel appareil, quels résultats.
+// ────────────────────────────────────────────────────────────────
+async function getUserDetail({ uid }) {
+  if (!uid || typeof uid !== 'string') throw { status: 400, message: 'uid requis.' };
+  const { db } = getAdminServices();
+
+  const [userDoc, dailySnap, activitySnap] = await Promise.all([
+    db.collection('users').doc(uid).get(),
+    db.collection('users').doc(uid).collection('analytics_daily').get(),
+    db.collection('users').doc(uid).collection('dailyActivity').orderBy('date', 'desc').limit(60).get()
+      .catch(() => null)
+  ]);
+  if (!userDoc.exists) throw { status: 404, message: 'Utilisateur introuvable.' };
+
+  const userData = userDoc.data() || {};
+  const u = serializeUser(userDoc);
+
+  let totalTime = 0, sessions = 0, views = 0, resultsCount = 0;
+  let lastSeen = null, firstSeen = null, device = null;
+  const pagesMap = {}, featuresMap = {}, contentsMap = {}, byDate = {};
+  const dailyDocs = dailySnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+
+  dailyDocs.forEach((daily) => {
+    const date = String(daily.date || daily.id || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    totalTime += Number(daily.totalTime) || 0;
+    sessions += Number(daily.sessions) || 0;
+    resultsCount += Number(daily.resultsCount) || 0;
+    if (daily.device) device = daily.device;
+    if (!firstSeen || date < firstSeen) firstSeen = date;
+    if (!lastSeen || date > lastSeen) lastSeen = date;
+    byDate[date] = (byDate[date] || 0) + (Number(daily.totalTime) || 0);
+
+    const pages = { ...(daily.pages || {}) };
+    Object.entries(daily).forEach(([k, v]) => { if (k.startsWith('pages.')) pages[k.replace('pages.', '')] = v; });
+    Object.entries(pages).forEach(([k, v]) => { pagesMap[k] = (pagesMap[k] || 0) + Number(v || 0); views += Number(v || 0); });
+
+    const features = { ...(daily.features || {}) };
+    Object.entries(daily).forEach(([k, v]) => { if (k.startsWith('features.')) features[k.replace('features.', '')] = v; });
+    Object.entries(features).forEach(([k, v]) => { featuresMap[k] = (featuresMap[k] || 0) + Number(v || 0); });
+
+    const contents = { ...(daily.contents || {}) };
+    Object.entries(daily).forEach(([k, v]) => { if (k.startsWith('contents.')) contents[k.replace('contents.', '')] = v; });
+    Object.entries(contents).forEach(([k, v]) => { contentsMap[k] = (contentsMap[k] || 0) + Number(v || 0); });
+  });
+
+  const toMap = (m, n, cleanKey) => Object.entries(m)
+    .map(([k, v]) => ({ key: cleanKey ? String(k).replace(/^subject_/, '') : k, count: v }))
+    .sort((a, b) => b.count - a.count).slice(0, n);
+
+  // Activité serveur (sections + minutes d'étude)
+  let sectionsCreated = 0, studyMinutes = 0, lastStudy = null;
+  const activity = [];
+  (activitySnap ? activitySnap.docs : []).forEach((d) => {
+    const a = d.data() || {};
+    sectionsCreated += Number(a.sectionsCreated) || 0;
+    studyMinutes += Number(a.studyMinutes) || 0;
+    const date = d.id;
+    if (!lastStudy || date > lastStudy) lastStudy = date;
+    activity.push({ date, sections: Number(a.sectionsCreated) || 0, minutes: Number(a.studyMinutes) || 0 });
+  });
+
+  // Derniers résultats (examen / révision) — sous-collections results
+  const results = [];
+  const recentDates = Object.keys(byDate).sort().reverse().slice(0, 6);
+  for (const date of recentDates) {
+    try {
+      const rs = await db.collection('users').doc(uid).collection('analytics_daily').doc(date).collection('results').orderBy('createdAt', 'desc').limit(5).get();
+      rs.docs.forEach((d) => {
+        const r = d.data() || {};
+        results.push({
+          kind: r.kind || 'resultat',
+          subject: r.subject || null,
+          score: Number(r.score) || 0,
+          total: Number(r.total) || 0,
+          difficulty: r.difficulty || null,
+          date
+        });
+      });
+    } catch (e) { /* best-effort */ }
+  }
+  results.sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const lastSeenDaysAgo = lastSeen
+    ? Math.max(0, Math.round((Date.now() - new Date(lastSeen + 'T12:00:00Z').getTime()) / 86400000))
+    : null;
+
+  return {
+    success: true,
+    profile: u,
+    engagement: {
+      totalTime, sessions, views, resultsCount, daysActive: dailyDocs.length,
+      firstSeen, lastSeen, lastSeenDaysAgo, device,
+      avgSessionMin: sessions ? Math.round(totalTime / 60 / sessions) : 0,
+      minutesTotal: Math.round(totalTime / 60)
+    },
+    study: { sectionsCreated, studyMinutes, lastStudy },
+    topPages: toMap(pagesMap, 6),
+    topFeatures: toMap(featuresMap, 6),
+    topContents: toMap(contentsMap, 6, true),
+    byDate,
+    results: results.slice(0, 8),
+    activity: activity.slice(0, 30)
   };
 }
 
@@ -1432,6 +1641,7 @@ module.exports = async function handler(request, response) {
 
       case 'getSubscriptions': return response.status(200).json(await getSubscriptions());
       case 'getUsers': return response.status(200).json(await getUsers(body));
+      case 'getUserDetail': return response.status(200).json(await getUserDetail(body));
       case 'approveSubscription': return response.status(200).json(await approveSubscription(body, adminContext));
       case 'rejectSubscription': return response.status(200).json(await rejectSubscription(body, adminContext));
       case 'giftPremium': return response.status(200).json(await giftPremium(body, adminContext));
