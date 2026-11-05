@@ -555,7 +555,8 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
 
   const topPagesMap = {};
   const topFeaturesMap = {};
-  const topContentsMap = {};
+      const topContentsMap = {}; // matières préférées (contents.subject_*) — v1.9+v2.0
+      const byDevice = { mobile: 0, tablet: 0, desktop: 0, unknown: 0 }; // ⚡ v2.0
   const byTimeOfDay = { matin: 0, apresmidi: 0, soir: 0, nuit: 0 };
   const byDayOfWeek = { lundi: 0, mardi: 0, mercredi: 0, jeudi: 0, vendredi: 0, samedi: 0, dimanche: 0 };
   const byDate = {};
@@ -614,19 +615,40 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
       let userSessions = 0;
       let userSections = 0;
       let userStudyMin = 0;
-      // ⚡ v1.9 — profil d'engagement par élève
-      let userLastDate = null;
-      let userDaysActive = 0;
-      let userDevice = null;
-      const userContents = {};
+        // ⚡ v1.9 — profil d'engagement par élève
+        let userLastDate = null;
+        let userDaysActive = 0;
+        const userContents = {};
+        // ⚡ v2.0 — données de fiche élève
+        let userLastSeen = null;       // date (ISO) du dernier jour d'activité
+        let userLastSeenTs = 0;        // timestamp lastSeenAt le plus récent
+        const userPagesMap = {};
+        const userFeaturesMap = {};
+        const userContentsMap = {};
+        const userByDate = {};   // ⚡ v2.0 — temps par jour (mini-courbe fiche élève)
+        let userDevice = null;
 
       // ⚡ SECTIONS + MINUTES D'ÉTUDE (dailyActivity, écrit serveur — fiable)
       (activityDocs || []).forEach((a) => {
         userSections += Number(a.sectionsCreated) || 0;
         userStudyMin += Number(a.studyMinutes) || 0;
+        // ⚡ v2.0 — dernier vu : dailyActivity compte aussi comme activité
+        if (a.date && (!userLastSeen || a.date > userLastSeen)) userLastSeen = a.date;
+        const la = a.lastAt;
+        const laTs = la && typeof la.toDate === 'function' ? la.toDate().getTime()
+          : (la && la._seconds ? la._seconds * 1000 : 0);
+        if (laTs > userLastSeenTs) userLastSeenTs = laTs;
       });
 
       dailyDocs.forEach((daily) => {
+        // ⚡ v2.0 — fiche élève : dernier vu + appareil
+        if (daily.date && (!userLastSeen || daily.date > userLastSeen)) userLastSeen = daily.date;
+        const lst = daily.lastSeenAt;
+        const lstTs = lst && typeof lst.toDate === 'function' ? lst.toDate().getTime()
+          : (lst && lst._seconds ? lst._seconds * 1000 : 0);
+        if (lstTs > userLastSeenTs) userLastSeenTs = lstTs;
+        if (daily.device) userDevice = daily.device;
+
         // ⚡ PAGES — lire les 2 formats
         const pages = { ...(daily.pages || {}) };
         Object.entries(daily).forEach(([key, value]) => {
@@ -637,6 +659,7 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
         Object.entries(pages).forEach(([path, count]) => {
           const p = String(path).replace(/_/g, '/');
           topPagesMap[p] = (topPagesMap[p] || 0) + Number(count || 0);
+          userPagesMap[p] = (userPagesMap[p] || 0) + Number(count || 0);
           userViews += Number(count || 0);
         });
 
@@ -649,7 +672,9 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
         });
         Object.entries(features).forEach(([feature, count]) => {
           topFeaturesMap[feature] = (topFeaturesMap[feature] || 0) + Number(count || 0);
+          userFeaturesMap[feature] = (userFeaturesMap[feature] || 0) + Number(count || 0);
         });
+
 
         // ⚡ TIME OF DAY
         const timeOfDay = { ...(daily.byTimeOfDay || {}) };
@@ -683,7 +708,12 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
         Object.entries(contents).forEach(([k, v]) => {
           topContentsMap[k] = (topContentsMap[k] || 0) + Number(v || 0);
           userContents[k] = (userContents[k] || 0) + Number(v || 0);
+          userContentsMap[k] = (userContentsMap[k] || 0) + Number(v || 0); // ⚡ v2.0
         });
+        // ⚡ v2.0 — APPAREILS
+        if (daily.device && byDevice[daily.device] !== undefined) {
+          byDevice[daily.device]++;
+        }
 
         // ⚡ PROFIL : dernière date active + appareil + jours actifs
         if (daily.date && (!userLastDate || String(daily.date) > userLastDate)) userLastDate = String(daily.date);
@@ -693,6 +723,8 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
         // ⚡ DATE
         if (daily.date) {
           byDate[daily.date] = (byDate[daily.date] || 0) + (Number(daily.totalTime) || 0);
+          // ⚡ v2.0 — temps par jour de CET utilisateur
+          userByDate[daily.date] = (userByDate[daily.date] || 0) + (Number(daily.totalTime) || 0);
         }
 
         // ⚡ TOTAL
@@ -702,6 +734,10 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
 
       if (userTime > 0 || userViews > 0 || userSections > 0 || userStudyMin > 0) {
         const topUserContent = Object.entries(userContents).sort((a, b) => b[1] - a[1])[0];
+        // ⚡ v2.0 — favoris de l'élève (pour la fiche analytique)
+        const topMap = (m, n, stripPrefix) => Object.entries(m)
+          .sort((a, b) => b[1] - a[1]).slice(0, n)
+          .map(([k, v]) => ({ key: stripPrefix ? String(k).replace(/^subject_/, '') : k, count: v }));
         topUsers.push({
           uid: userDoc.id,
           name: String(userData.fullName || '').trim()
@@ -719,7 +755,15 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
           topContent: topUserContent ? topUserContent[0].replace(/^subject_/, '') : null,
           lastSeenDaysAgo: userLastDate
             ? Math.max(0, Math.round((Date.now() - new Date(userLastDate + 'T12:00:00Z').getTime()) / 86400000))
-            : null
+            : null,
+          // ⚡ v2.0
+          lastSeenDate: userLastSeen,
+          lastSeenAt: userLastSeenTs || null,
+          isOwner: isOwnerAdmin(userData),
+          topPages: topMap(userPagesMap, 6, true),
+          topFeatures: topMap(userFeaturesMap, 6, false),
+          topSubjects: topMap(userContentsMap, 6, true),
+          byDate: userByDate
         });
         summary.totalTime += userTime;
         summary.totalViews += userViews;
@@ -746,6 +790,15 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
 
+  // ⚡ v2.0 — matières préférées globales
+  const topContents = Object.entries(topContentsMap)
+    .map(([key, count]) => ({ subject: String(key).replace(/^subject_/, ''), count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  // ⚡ v2.0 — le propriétaire dans les résultats ? (pour le filtre front)
+  const ownerInResults = topUsers.some((u) => u.isOwner);
+
   topUsers.sort((a, b) => b.totalTime - a.totalTime);
 
   // ⚡ v1.9 — ÉLÈVES À RISQUE : avaient une activité, plus rien depuis ≥ 7 j.
@@ -768,11 +821,6 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
   });
   inactive7.sort((a, b) => b.days - a.days);
 
-  const topContents = Object.entries(topContentsMap)
-    .map(([key, count]) => ({ subject: String(key).replace(/^subject_/, ''), count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 8);
-
   const daysSorted = Object.entries(byDate).sort((a, b) => b[1] - a[1]);
   if (daysSorted.length > 0) {
     summary.mostActiveDay = daysSorted[0][0];
@@ -787,11 +835,14 @@ async function getAnalytics({ startTs, endTs, filter = 'all', includeAdmin = fal
     topPages,
     topFeatures,
     topContents,
+    byDevice,      // ⚡ v2.0
+    ownerInResults, // ⚡ v2.0 (le front affiche un rappel si true et filtre actif)
     byTimeOfDay,
     byDayOfWeek,
     byDate,
-    topUsers: topUsers.slice(0, 20),
-    inactive7: inactive7.slice(0, 20)
+    topUsers: topUsers.slice(0, 30),
+    allUsers: topUsers, // ⚡ v2.0 — complet pour les fiches élève + CSV
+    inactive7: inactive7.slice(0, 20) // ⚡ v1.9
   };
 }
 
@@ -901,6 +952,232 @@ async function getUserDetail({ uid }) {
     byDate,
     results: results.slice(0, 8),
     activity: activity.slice(0, 30)
+  };
+}
+
+// ⚡ v2.0 — SANTÉ DU PIPELINE ANALYTICS
+// Le propriétaire doit pouvoir vérifier D'UN COUP D'ŒIL que le suivi
+// fonctionne : dernière donnée reçue (tracker client + API serveur),
+// nombre d'élèves actifs par fenêtre, statut global + diagnostic.
+// ────────────────────────────────────────────────────────────────
+async function getAnalyticsHealth() {
+  const { db } = getAdminServices();
+  const usersSnap = await db.collection('users').get();
+  const users = usersSnap.docs.map((d) => ({ id: d.id, data: d.data() }));
+
+  const nowMs = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const d1 = new Date(nowMs - 1 * DAY).toISOString().slice(0, 10);
+  const d7 = new Date(nowMs - 7 * DAY).toISOString().slice(0, 10);
+  const d30 = new Date(nowMs - 30 * DAY).toISOString().slice(0, 10);
+
+  let lastClientWriteMs = 0;   // dernière écriture analytics_daily (tracker)
+  let lastClientWriteBy = null;
+  let lastServerWriteMs = 0;   // dernière écriture dailyActivity (API)
+  let lastServerWriteBy = null;
+  let active1 = 0, active7 = 0, active30 = 0;
+  let trackedUsers = 0;        // users ayant AU MOINS un doc analytics
+
+  const toTs = (v) => {
+    if (!v) return 0;
+    if (typeof v.toDate === 'function') return v.toDate().getTime();
+    if (v._seconds !== undefined) return v._seconds * 1000;
+    if (v.seconds !== undefined) return v.seconds * 1000;
+    return 0;
+  };
+
+  const chunks = [];
+  for (let i = 0; i < users.length; i += 10) chunks.push(users.slice(i, i + 10));
+
+  for (const chunk of chunks) {
+    await Promise.all(chunk.map(async ({ id, data }) => {
+      try {
+        const aSnap = await db.collection('users').doc(id).collection('analytics_daily').get();
+        if (!aSnap.empty) trackedUsers++;
+        aSnap.docs.forEach((d) => {
+          const f = d.data();
+          // dernier ts d'écriture client = champ lastSeenAt (l'id n'est qu'une date)
+          const tsOnly = toTs(f.lastSeenAt);
+          if (tsOnly > lastClientWriteMs) {
+            lastClientWriteMs = tsOnly;
+            lastClientWriteBy = String(data.fullName || data.email || id);
+          }
+          if (d.id >= d1) active1++;
+          if (d.id >= d7) active7++;
+          if (d.id >= d30) active30++;
+        });
+      } catch (e) { /* best-effort */ }
+      try {
+        const dSnap = await db.collection('users').doc(id).collection('dailyActivity').get();
+        dSnap.docs.forEach((d) => {
+          const ts = toTs(d.data().lastAt);
+          if (ts > lastServerWriteMs) {
+            lastServerWriteMs = ts;
+            lastServerWriteBy = String(data.fullName || data.email || id);
+          }
+        });
+      } catch (e) { /* best-effort */ }
+    }));
+  }
+
+  const lastAnyMs = Math.max(lastClientWriteMs, lastServerWriteMs);
+  const ageMin = lastAnyMs ? Math.round((nowMs - lastAnyMs) / 60000) : null;
+
+  let status = 'dead';
+  let message = 'Aucune donnée reçue — le suivi n’a jamais rien écrit.';
+  if (ageMin !== null && ageMin <= 60 * 26) {
+    status = 'ok';
+    message = 'Le suivi fonctionne : des données sont bien reçues.';
+  } else if (ageMin !== null) {
+    status = 'warning';
+    message = `Dernière donnée il y a ${Math.round(ageMin / 60 / 24)} jour(s) — personne ne s’est connecté depuis, ou le suivi est bloqué.`;
+  }
+
+  return {
+    success: true,
+    health: {
+      status, message,
+      ageMinutes: ageMin,
+      lastClientWriteAt: lastClientWriteMs || null,
+      lastClientWriteBy,
+      lastServerWriteAt: lastServerWriteMs || null,
+      lastServerWriteBy,
+      activeToday: active1,   // docs datés d'aujourd'hui UTC ou hier (marge fuseau)
+      active7,
+      active30,
+      trackedUsers,
+      totalUsers: users.length,
+      checkedAt: nowMs
+    }
+  };
+}
+
+// ────────────────────────────────────────────────────────────────
+// ⚡ v2.0 — RÉTENTION / ABANDON
+// « Pourquoi tel élève a arrêté d'utiliser le site ? » → pour CHAQUE
+// élève : dernier accès, jours d'inactivité, temps cumulé, vues,
+// sections, matière préférée, appareil, statut
+// (actif / récent / à risque / perdu / jamais vu).
+// ────────────────────────────────────────────────────────────────
+async function getRetention() {
+  const { db } = getAdminServices();
+  const usersSnap = await db.collection('users').get();
+  const users = usersSnap.docs;
+
+  const nowMs = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+
+  const toTs = (v) => {
+    if (!v) return 0;
+    if (typeof v.toDate === 'function') return v.toDate().getTime();
+    if (v._seconds !== undefined) return v._seconds * 1000;
+    if (v.seconds !== undefined) return v.seconds * 1000;
+    return 0;
+  };
+
+  const buckets = { active1: 0, active7: 0, active30: 0, atRisk: 0, lost: 0, neverSeen: 0 };
+  const rows = [];
+
+  const chunks = [];
+  for (let i = 0; i < users.length; i += 10) chunks.push(users.slice(i, i + 10));
+
+  for (const chunk of chunks) {
+    await Promise.all(chunk.map(async (userDoc) => {
+      const u = userDoc.data();
+      let lastDate = null;       // « YYYY-MM-DD » le plus récent (2 sources)
+      let lastTs = 0;            // timestamp le plus récent
+      let totalTime = 0, views = 0, sessions = 0, sections = 0, studyMin = 0;
+      const contentsMap = {};
+      let device = null;
+
+      try {
+        const aSnap = await db.collection('users').doc(userDoc.id).collection('analytics_daily').get();
+        aSnap.docs.forEach((d) => {
+          const f = d.data();
+          if (!lastDate || d.id > lastDate) lastDate = d.id;
+          lastTs = Math.max(lastTs, toTs(f.lastSeenAt));
+          totalTime += Number(f.totalTime) || 0;
+          sessions += Number(f.sessions) || 0;
+          if (f.device) device = f.device;
+          const pages = { ...(f.pages || {}) };
+          Object.entries(f).forEach(([k, v]) => { if (k.startsWith('pages.')) pages[k.slice(6)] = v; });
+          Object.values(pages).forEach((c) => { views += Number(c) || 0; });
+          const contents = { ...(f.contents || {}) };
+          Object.entries(f).forEach(([k, v]) => { if (k.startsWith('contents.')) contents[k.slice(9)] = v; });
+          Object.entries(contents).forEach(([k, v]) => { contentsMap[k] = (contentsMap[k] || 0) + Number(v) || 0; });
+        });
+      } catch (e) { /* best-effort */ }
+
+      try {
+        const dSnap = await db.collection('users').doc(userDoc.id).collection('dailyActivity').get();
+        dSnap.docs.forEach((d) => {
+          const f = d.data();
+          if (!lastDate || d.id > lastDate) lastDate = d.id;
+          lastTs = Math.max(lastTs, toTs(f.lastAt));
+          sections += Number(f.sectionsCreated) || 0;
+          studyMin += Number(f.studyMinutes) || 0;
+        });
+      } catch (e) { /* best-effort */ }
+
+      let daysSince = null;
+      if (lastDate) {
+        const last = new Date(lastDate + 'T00:00:00Z').getTime();
+        daysSince = Math.max(0, Math.floor((nowMs - last) / DAY));
+      } else if (lastTs) {
+        daysSince = Math.max(0, Math.floor((nowMs - lastTs) / DAY));
+      }
+
+      let status = 'neverSeen';
+      if (daysSince === null) status = 'neverSeen';
+      else if (daysSince <= 1) status = 'active1';
+      else if (daysSince <= 7) status = 'active7';
+      else if (daysSince <= 30) status = 'active30';
+      else if (daysSince <= 60) status = 'atRisk';
+      else status = 'lost';
+      buckets[status] = (buckets[status] || 0) + 1;
+
+      const favSubject = Object.entries(contentsMap).sort((a, b) => b[1] - a[1])[0];
+
+      rows.push({
+        uid: userDoc.id,
+        name: String(u.fullName || '').trim()
+          || `${u.firstName || ''} ${u.lastName || ''}`.trim()
+          || (u.email || 'Utilisateur'),
+        email: u.email || '',
+        isOwner: isOwnerAdmin(u),
+        lastSeenDate: lastDate,
+        lastSeenAt: lastTs || null,
+        daysSince,
+        status,
+        totalTime,
+        views,
+        sessions,
+        sections,
+        studyMin,
+        device,
+        favSubject: favSubject ? String(favSubject[0]).replace(/^subject_/, '') : null
+      });
+    }));
+  }
+
+  // tri : inactifs les plus anciens en premier (ce sont eux qui intéressent)
+  rows.sort((a, b) => {
+    if (a.daysSince === null && b.daysSince === null) return 0;
+    if (a.daysSince === null) return 1;
+    if (b.daysSince === null) return -1;
+    return b.daysSince - a.daysSince;
+  });
+
+  const seen = rows.filter((r) => r.status !== 'neverSeen').length;
+  const retained7 = seen ? Math.round((buckets.active1 + buckets.active7) / seen * 100) : 0;
+  const retained30 = seen ? Math.round((buckets.active1 + buckets.active7 + buckets.active30) / seen * 100) : 0;
+
+  return {
+    success: true,
+    buckets,
+    retained7,
+    retained30,
+    users: rows
   };
 }
 
@@ -1638,6 +1915,8 @@ module.exports = async function handler(request, response) {
       case 'getDashboard': return response.status(200).json(await getDashboard());
       case 'getStats': return response.status(200).json(await getStats());
       case 'getAnalytics': return response.status(200).json(await getAnalytics(body));
+      case 'getAnalyticsHealth': return response.status(200).json(await getAnalyticsHealth());
+      case 'getRetention': return response.status(200).json(await getRetention());
 
       case 'getSubscriptions': return response.status(200).json(await getSubscriptions());
       case 'getUsers': return response.status(200).json(await getUsers(body));

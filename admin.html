@@ -1965,6 +1965,9 @@
         <button class="nav-btn" data-view="analytics">
         <i class="fas fa-chart-bar"></i> Analytics
         </button>
+        <button class="nav-btn" data-view="retention">
+          <i class="fas fa-user-clock"></i> Rétention
+        </button>
 
         <div class="sidebar-label">Système</div>
         <button class="nav-btn" data-view="logs">
@@ -2232,9 +2235,17 @@
     <p id="analyticsSub">Comportement des élèves</p>
   </div>
 
+  <!-- v2.0 - SANTE DU SUIVI : preuve en temps reel que la remontee fonctionne -->
+  <div class="block" id="analyticsHealthBlock" style="margin-bottom:16px">
+    <div id="analyticsHealth" style="padding:14px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border)">
+      <div class="loading"><div class="spinner"></div><span>Vérification du suivi…</span></div>
+    </div>
+  </div>
+
   <div class="filters">
     <div class="custom-select" id="analyticsRange" data-name="analyticsRange"></div>
     <div class="custom-select" id="analyticsView" data-name="analyticsView"></div>
+    <div class="custom-select" id="analyticsOwner" data-name="analyticsOwner"></div>
   </div>
 
   <div class="grid" id="analyticsStats">
@@ -2280,17 +2291,28 @@
 
   <div class="block">
     <div class="block-head">
-      <div class="block-title"><i class="fas fa-graduation-cap"></i> Matières les plus consultées</div>
+      <div class="block-title"><i class="fas fa-book"></i> Matières les plus consultées</div>
     </div>
-    <div id="topContentsList" style="margin-top:12px">
+    <div id="topContentsList">
       <div class="loading"><div class="spinner"></div><span>Chargement...</span></div>
     </div>
   </div>
 
   <div class="block">
     <div class="block-head">
+      <div class="block-title"><i class="fas fa-mobile-screen"></i> Appareils utilisés</div>
+    </div>
+    <div class="chart-wrap sm"><canvas id="chartDevices"></canvas></div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
       <div class="block-title"><i class="fas fa-users"></i> Top utilisateurs</div>
       <span class="block-sub" id="topUsersSub">—</span>
+    </div>
+    <div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-secondary btn-sm" id="exportAnalyticsBtn"><i class="fas fa-file-csv"></i> Exporter en CSV</button>
+      <span style="font-size:11.5px;color:var(--text-dim)">Touchez un élève pour ouvrir sa fiche d'activité complète</span>
     </div>
     <div id="topUsersList">
       <div class="loading"><div class="spinner"></div><span>Chargement...</span></div>
@@ -2304,6 +2326,36 @@
     </div>
     <p style="font-size:12px;color:var(--text-dim);margin:-4px 0 10px">Élèves qui utilisaient ARVEXA et n'ont plus aucune activité récente — ouvre leur fiche pour comprendre (appareil, pages préférées, cadence) et relance-les par une notification.</p>
     <div id="inactiveList">
+      <div class="loading"><div class="spinner"></div><span>Chargement...</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ========== v2.0 RETENTION ========== -->
+<section class="view" id="view-retention">
+  <div class="page-head">
+    <h1>Rétention</h1>
+    <p id="retentionSub">Qui revient, qui décroche — et ce qu'il préfère</p>
+  </div>
+
+  <div class="grid" id="retentionStats">
+    <div class="loading" style="grid-column:1/-1"><div class="spinner"></div><span>Chargement...</span></div>
+  </div>
+
+  <div class="filters">
+    <div class="custom-select" id="retentionFilter" data-name="retentionFilter"></div>
+    <div class="search">
+      <i class="fas fa-search"></i>
+      <input type="text" id="retentionSearch" placeholder="Rechercher un élève...">
+    </div>
+  </div>
+
+  <div class="block">
+    <div class="block-head">
+      <div class="block-title"><i class="fas fa-user-clock"></i> Élèves par dernier accès</div>
+      <span class="block-sub" id="retentionTableSub">—</span>
+    </div>
+    <div id="retentionList">
       <div class="loading"><div class="spinner"></div><span>Chargement...</span></div>
     </div>
   </div>
@@ -2397,6 +2449,7 @@
     <button class="nav-btn" data-view="moderation"><i class="fas fa-comments"></i> Modération</button>
     <button class="nav-btn" data-view="logs"><i class="fas fa-clipboard-list"></i> Logs</button>
     <button class="nav-btn" data-view="analytics"><i class="fas fa-chart-bar"></i> Analytics</button>
+    <button class="nav-btn" data-view="retention"><i class="fas fa-user-clock"></i> Rétention</button>
     <button class="nav-btn" data-view="settings"><i class="fas fa-cog"></i> Paramètres</button>
   </div>
 </div>
@@ -2510,7 +2563,12 @@ const state = {
   charts: {},
   stats: {},
   currentView: 'dashboard',
-  customSelects: {}
+  customSelects: {},
+  // v2.0 - analytics
+  analyticsData: null,
+  analyticsHealth: null,
+  retentionData: null,
+  retentionByUid: {}
 };
 
 // ================================================================
@@ -3101,7 +3159,11 @@ function switchView(view) {
     requestAnimationFrame(() => requestAnimationFrame(() => loadFinance()));
   }
   if (view === 'analytics') {
-    requestAnimationFrame(() => requestAnimationFrame(() => loadAnalytics()));
+    requestAnimationFrame(() => requestAnimationFrame(() => { loadAnalyticsHealth(); loadAnalytics(); }));
+  }
+  // v2.0 - vue Rétention : qui revient, qui décroche
+  if (view === 'retention') {
+    requestAnimationFrame(() => requestAnimationFrame(() => loadRetention()));
   }
   if (view === 'dashboard') {
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -3141,6 +3203,9 @@ function bindTopbar() {
     });
     if (state.currentView === 'dashboard') { renderSignups(); renderPie(); }
     if (state.currentView === 'finance') renderRevenue();
+    // v2.0 - re-rendre les vues d'analyse (charts recréés avec les bonnes couleurs)
+    if (state.currentView === 'analytics') { loadAnalyticsHealth(); loadAnalytics(); }
+    if (state.currentView === 'retention') { renderRetention(); }
   });
 }
 
@@ -3170,6 +3235,9 @@ async function reloadAll() {
     loadDashboard();
     updateBadges();
     updateSubFilterCounts();
+    // v2.0 - santé du suivi + rétention (non bloquant)
+    loadAnalyticsHealth();
+    loadRetention();
   } catch (e) {
     console.error('reloadAll error:', e);
     toast('Erreur de chargement : ' + e.message, 'error', 5000);
@@ -3255,7 +3323,15 @@ function loadDashboard() {
     </div>
   `;
 
-  $('dashSub').textContent = `${s.totalUsers || 0} utilisateurs · ${s.premiumUsers || 0} premium`;
+  // v2.0 - état du suivi en clair sur le dashboard
+  const h = state.analyticsHealth;
+  let healthBit = '';
+  if (h) {
+    if (h.status === 'ok') healthBit = ` · suivi ✅ (dernière donnée ${relDays(null, h.lastClientWriteAt || h.lastServerWriteAt)})`;
+    else if (h.status === 'warning') healthBit = ' · suivi ⚠️ données anciennes';
+    else healthBit = ' · suivi ❌ aucune donnée';
+  }
+  $('dashSub').textContent = `${s.totalUsers || 0} utilisateurs · ${s.premiumUsers || 0} premium${healthBit}`;
 
   renderSignups();
   renderPie();
@@ -3825,7 +3901,7 @@ function renderUsers() {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Utilisateur</th><th>Téléphone</th><th>Rôle</th><th>Statut</th><th>Inscrit</th><th></th></tr>
+          <tr><th>Utilisateur</th><th>Téléphone</th><th>Rôle</th><th>Statut</th><th>Dernier accès</th><th>Inscrit</th><th></th></tr>
         </thead>
         <tbody>
           ${list.slice(0, 100).map((u) => {
@@ -3846,6 +3922,13 @@ function renderUsers() {
                     u.subscriptionStatus === 'pending' ? '<span class="badge gold">Attente</span>' :
                     '<span class="badge gray">Gratuit</span>'}
                 </td>
+                <td data-label="Dernier accès" style="font-size:11.5px;color:var(--text-dim)">${(() => {
+                  const r = state.retentionByUid[u.id];
+                  if (!r) return '—';
+                  const d = r.daysSince;
+                  const when = d === null || d === undefined ? '—' : (d <= 0 ? "auj." : d === 1 ? 'hier' : `il y a ${d} j`);
+                  return `${when}${r.totalTime ? ' · ' + formatDuration(r.totalTime) : ''}`;
+                })()}</td>
                 <td data-label="Inscrit" style="font-size:11.5px;color:var(--text-dim)">${fmtDate(u.createdAt)}</td>
                 <td data-label=""><button class="btn btn-secondary btn-sm" onclick="window.__openUser('${u.id}')"><i class="fas fa-eye"></i></button></td>
               </tr>
@@ -4947,11 +5030,26 @@ function initAnalyticsSelects() {
     { value: 'free', label: 'Gratuits uniquement', prefix: '🔓' }
   ]);
   state.customSelects.analyticsView.onChange = () => loadAnalytics();
+
+  // v2.0 - inclure ou non le compte propriétaire (ses visites SONT
+  // enregistrées depuis analytics v4 — utile pour vérifier que tout marche)
+  state.customSelects.analyticsOwner = new CustomSelect($('analyticsOwner'), [
+    { value: 'include', label: 'Tout le monde', prefix: '🌍' },
+    { value: 'exclude', label: 'Élèves seulement', prefix: '🎓' }
+  ]);
+  state.customSelects.analyticsOwner.onChange = () => loadAnalytics();
+
+  // v2.0 - export CSV + recherche rétention
+  const exportBtn = $('exportAnalyticsBtn');
+  if (exportBtn) exportBtn.addEventListener('click', exportAnalyticsCsv);
+  const rSearch = $('retentionSearch');
+  if (rSearch) rSearch.addEventListener('input', () => renderRetentionList());
 }
 
 async function loadAnalytics() {
   const range = state.customSelects.analyticsRange?.getValue() || '7days';
   const view = state.customSelects.analyticsView?.getValue() || 'all';
+  const ownerMode = state.customSelects.analyticsOwner?.getValue() || 'include';
 
   // ⚡ Attendre Chart.js avant même de commencer
   if (!window.Chart) {
@@ -4977,9 +5075,11 @@ async function loadAnalytics() {
     const data = await callApi('getAnalytics', {
       startTs: startDate.getTime(),
       endTs: Date.now(),
-      filter: view
+      filter: view,
+      includeAdmin: ownerMode === 'include'
     });
 
+    state.analyticsData = data;
     renderAnalytics(data);
   } catch (e) {
     console.error('loadAnalytics error:', e);
@@ -5039,7 +5139,20 @@ function renderAnalytics(data) {
     </div>
   `;
 
-  $('analyticsSub').textContent = `${s.totalViews || 0} vues · ${s.uniqueUsers || 0} élèves`;
+  $('analyticsSub').textContent = `${s.totalViews || 0} vues · ${s.uniqueUsers || 0} profil(s) actif(s)`;
+
+  // v2.0 - message explicite quand il n'y a AUCUNE donnée sur la période
+  if (!s.totalViews && !s.totalTime && !s.totalSections && !(data.topUsers || []).length) {
+    const h = state.analyticsHealth;
+    const hint = h && h.lastClientWriteAt
+      ? `Dernière donnée reçue le ${new Date(h.lastClientWriteAt).toLocaleString('fr-FR')}. Élargissez la période avec le sélecteur ci-dessus.`
+      : 'Ouvrez le site en étant connecté : la première écriture part ~8 s après le début de la visite.';
+    $('topPagesList').innerHTML = `<div class="empty"><i class="fas fa-inbox"></i><strong>Aucune donnée sur cette période</strong><span>${esc(hint)}</span></div>`;
+    $('topFeaturesList').innerHTML = '<div class="empty"><i class="fas fa-inbox"></i><strong>Aucune donnée</strong><span>—</span></div>';
+    $('topContentsList').innerHTML = '<div class="empty"><i class="fas fa-inbox"></i><strong>Aucune donnée</strong><span>—</span></div>';
+    $('topUsersList').innerHTML = '<div class="empty"><i class="fas fa-inbox"></i><strong>Aucun élève actif sur la période</strong><span>—</span></div>';
+    return;
+  }
 
   // ⚡ Rendu en cascade avec délais pour être sûr que le DOM est prêt
   requestAnimationFrame(() => {
@@ -5063,11 +5176,15 @@ function renderAnalytics(data) {
   });
 
   requestAnimationFrame(() => {
-    try { renderTopUsers(data.topUsers || []); } catch (e) { console.error('renderTopUsers:', e); }
+    try { renderTopUsers(data.allUsers || data.topUsers || []); } catch (e) { console.error('renderTopUsers:', e); }
   });
 
+  // v2.0 - matières préférées + appareils
   requestAnimationFrame(() => {
     try { renderTopContents(data.topContents || []); } catch (e) { console.error('renderTopContents:', e); }
+  });
+  requestAnimationFrame(() => {
+    try { renderDevices(data.byDevice || {}); } catch (e) { console.error('renderDevices:', e); }
   });
 
   requestAnimationFrame(() => {
@@ -5297,28 +5414,6 @@ function renderTimeSpentChart(data) {
   });
 }
 
-// ⚡ v1.9 — Matières les plus consultées
-function renderTopContents(contents) {
-  if (!contents.length) {
-    $('topContentsList').innerHTML = '<div class="empty">Aucune donnée</div>';
-    return;
-  }
-  const max = contents[0].count;
-  const icons = { mathematiques: 'fa-square-root-variable', physique: 'fa-atom', chimie: 'fa-flask', svt: 'fa-dna', philosophie: 'fa-brain', histoire: 'fa-landmark', geographie: 'fa-earth-africa', francais: 'fa-book' };
-  $('topContentsList').innerHTML = contents.map((c) => `
-    <div class="log-item">
-      <div class="log-item-action">
-        <i class="fas ${icons[c.subject] || 'fa-book'}"></i>
-        <div style="min-width:0;flex:1">
-          <div style="font-size:12.5px;color:var(--text);font-weight:500;text-transform:capitalize">${esc(c.subject)}</div>
-          <div class="progress-bar" style="margin:4px 0 0;height:4px"><span style="width:${Math.round((c.count / max) * 100)}%"></span></div>
-        </div>
-      </div>
-      <span class="log-item-time">${c.count}</span>
-    </div>`).join('');
-}
-
-// ⚡ v1.9 — Élèves inactifs depuis 7 jours ou plus (pourquoi il a arrêté)
 function renderInactive7(list) {
   if (!list.length) {
     $('inactiveList').innerHTML = '<div class="empty"><i class="fas fa-check-circle"></i><strong>Tous les élèves actifs sont revenus</strong><span>Aucun élève inactif depuis 7 jours.</span></div>';
@@ -5346,6 +5441,161 @@ function renderInactive7(list) {
     </div>`;
 }
 
+// ================================================================
+// v2.0 — ANALYTICS COMPLET : santé du suivi, matières, appareils,
+// top utilisateurs cliquables + CSV, fiche analytique élève,
+// vue Rétention (abandon / contenus préférés).
+// ================================================================
+
+const SUBJECT_LABELS = {
+  mathematiques: '📐 Mathématiques',
+  physique: '⚡ Physique',
+  chimie: '🧪 Chimie',
+  svt: '🌿 SVT',
+  histoire: '🏛️ Histoire',
+  geographie: '🗺️ Géographie',
+  philosophie: '🤔 Philosophie',
+  anglais: '🇬🇧 Anglais',
+  francais: '📖 Français'
+};
+
+function subjectLabel(k) {
+  return SUBJECT_LABELS[String(k || '').toLowerCase()] || String(k || '—');
+}
+
+function relDays(dateStr, ts) {
+  if (ts) {
+    const d = Math.floor((Date.now() - ts) / 86400000);
+    if (d <= 0) return "aujourd'hui";
+    if (d === 1) return 'hier';
+    return `il y a ${d} j`;
+  }
+  if (!dateStr) return '—';
+  const t = Date.parse(dateStr + 'T00:00:00Z');
+  if (isNaN(t)) return dateStr;
+  const d = Math.floor((Date.now() - t) / 86400000);
+  if (d <= 0) return "aujourd'hui";
+  if (d === 1) return 'hier';
+  return `il y a ${d} j`;
+}
+
+// ─── Santé du suivi (bandeau preuve) ─────────────────────────────────
+async function loadAnalyticsHealth() {
+  const el = $('analyticsHealth');
+  try {
+    const data = await callApi('getAnalyticsHealth');
+    state.analyticsHealth = data.health || null;
+    renderAnalyticsHealth();
+  } catch (e) {
+    console.error('loadAnalyticsHealth:', e);
+    if (el) {
+      el.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px">
+          <i class="fas fa-heart-pulse" style="color:#D9534F;font-size:18px"></i>
+          <div style="min-width:0">
+            <div style="font-weight:700;font-size:13.5px;color:var(--text)">Santé du suivi : vérification impossible</div>
+            <div style="font-size:12px;color:var(--text-dim)">${esc(e.message)}</div>
+          </div>
+        </div>`;
+    }
+  }
+}
+
+function renderAnalyticsHealth() {
+  const el = $('analyticsHealth');
+  if (!el || !state.analyticsHealth) return;
+  const h = state.analyticsHealth;
+
+  const styles = {
+    ok:      { bg: 'rgba(58,182,126,0.10)', bd: 'rgba(58,182,126,0.45)', ic: '#3AB67E', icon: 'fa-circle-check' },
+    warning: { bg: 'rgba(224,184,74,0.10)', bd: 'rgba(224,184,74,0.45)', ic: '#E0B84A', icon: 'fa-triangle-exclamation' },
+    dead:    { bg: 'rgba(217,83,79,0.10)',  bd: 'rgba(217,83,79,0.45)',  ic: '#D9534F', icon: 'fa-circle-xmark' }
+  }[h.status] || {};
+
+  const lastClient = h.lastClientWriteAt
+    ? `${relDays(null, h.lastClientWriteAt)} (${esc(h.lastClientWriteBy || '—')})`
+    : 'jamais';
+  const lastServer = h.lastServerWriteAt
+    ? `${relDays(null, h.lastServerWriteAt)} (${esc(h.lastServerWriteBy || '—')})`
+    : 'jamais';
+
+  el.style.background = styles.bg || 'transparent';
+  el.style.borderColor = styles.bd || 'var(--border)';
+  el.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <i class="fas ${styles.icon || 'fa-heart-pulse'}" style="color:${styles.ic || 'var(--text)'};font-size:20px;margin-top:2px"></i>
+      <div style="min-width:0;flex:1">
+        <div style="font-weight:700;font-size:14px;color:var(--text)">
+          Santé du suivi : ${h.status === 'ok' ? '✅ tout fonctionne' : h.status === 'warning' ? '⚠️ données anciennes' : '❌ aucune donnée'}
+        </div>
+        <div style="font-size:12.5px;color:var(--text-dim);margin-top:2px">${esc(h.message)}</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:6px;line-height:1.7">
+          <div>📡 Dernière écriture du tracker (vues/durée) : <strong style="color:var(--text)">${lastClient}</strong></div>
+          <div>🖥️ Dernière activité serveur (sections/minutes d'étude) : <strong style="color:var(--text)">${lastServer}</strong></div>
+          <div>👥 Actifs — aujourd'hui : <strong style="color:var(--text)">${h.activeToday || 0}</strong> · 7 j : <strong style="color:var(--text)">${h.active7 || 0}</strong> · 30 j : <strong style="color:var(--text)">${h.active30 || 0}</strong> · profils suivis : <strong style="color:var(--text)">${h.trackedUsers || 0}/${h.totalUsers || 0}</strong></div>
+          <div style="margin-top:4px;font-size:11.5px">💡 Depuis la v9.2 du site, TOUTES les visites sont enregistrées (y compris les vôtres) — la première écriture part ~8 s après l'ouverture d'une page.</div>
+        </div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="loadAnalyticsHealth()"><i class="fas fa-rotate"></i> Revérifier</button>
+    </div>`;
+}
+
+// ─── Matières les plus consultées ────────────────────────────────────
+function renderTopContents(contents) {
+  const el = $('topContentsList');
+  if (!el) return;
+  if (!contents.length) {
+    el.innerHTML = '<div class="empty"><i class="fas fa-book"></i><strong>Aucune donnée</strong></div>';
+    return;
+  }
+  const max = contents[0].count || 1;
+  el.innerHTML = contents.slice(0, 8).map((c) => `
+    <div class="log-item">
+      <div class="log-item-action">
+        <i class="fas fa-book-open"></i>
+        <div style="min-width:0;flex:1">
+          <div style="font-size:12.5px;color:var(--text);font-weight:500">${esc(subjectLabel(c.subject))}</div>
+          <div class="progress-bar" style="margin:4px 0 0;height:4px">
+            <span style="width:${Math.round((c.count / max) * 100)}%"></span>
+          </div>
+        </div>
+      </div>
+      <span class="log-item-time">${c.count}</span>
+    </div>
+  `).join('');
+}
+
+// ─── Appareils ────────────────────────────────────────────────────────
+function renderDevices(dev) {
+  const ctx = $('chartDevices');
+  if (!ctx) return;
+  const labels = { mobile: '📱 Mobile', tablet: '📱 Tablette', desktop: '💻 Ordinateur', unknown: '❓ Inconnu' };
+  const entries = Object.entries(dev).filter(([, v]) => v > 0);
+  if (state.charts.devices) state.charts.devices.destroy();
+  if (!entries.length) {
+    state.charts.devices = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels: ['Aucune donnée'], datasets: [{ data: [1], backgroundColor: ['rgba(128,128,128,0.2)'], borderWidth: 0 }] },
+      options: { plugins: { legend: { display: false } } }
+    });
+    return;
+  }
+  state.charts.devices = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: entries.map(([k]) => labels[k] || k),
+      datasets: [{
+        data: entries.map(([, v]) => v),
+        backgroundColor: ['#4AAFE0', '#3AB67E', '#E0B84A', '#8A8A7A'],
+        borderWidth: 0,
+        hoverOffset: 6
+      }]
+    },
+    options: chartOpts()
+  });
+}
+
+// ─── Top utilisateurs : cliquables, enrichis ─────────────────────────
 function renderTopUsers(users) {
   if (!users.length) {
     $('topUsersList').innerHTML = '<div class="empty"><i class="fas fa-users"></i><strong>Aucune donnée</strong></div>';
@@ -5353,20 +5603,21 @@ function renderTopUsers(users) {
     return;
   }
 
-  $('topUsersSub').textContent = `${users.length} élève(s)`;
+  $('topUsersSub').textContent = `${users.length} profil(s) — touchez une ligne pour la fiche d'activité`;
 
   $('topUsersList').innerHTML = `
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>#</th><th>Élève</th><th>Temps</th><th>Vues</th><th>Sections</th><th>Sessions</th><th></th></tr>
+          <tr><th>#</th><th>Élève</th><th>Temps</th><th>Vues</th><th>Sections</th><th>Sessions</th><th>Dernier accès</th><th></th></tr>
         </thead>
         <tbody>
-          ${users.slice(0, 20).map((u, i) => `
-            <tr>
+          ${users.slice(0, 30).map((u, i) => `
+            <tr style="cursor:pointer" onclick="window.__openAnalyticsUser('${u.uid}')">
               <td data-label="#" style="font-weight:700;color:var(--gold)">#${i + 1}</td>
               <td data-label="Élève">
                 <strong>${esc(u.name || 'Utilisateur')}</strong>
+                ${u.isOwner ? '<span class="badge gold" style="margin-left:6px">Propriétaire</span>' : ''}
                 <span class="sub">${esc(u.email || '')}</span>
                 ${u.lastSeenDaysAgo != null ? `<span class="sub">Dernière activité : ${u.lastSeenDaysAgo === 0 ? "aujourd'hui" : 'il y a ' + u.lastSeenDaysAgo + ' j'}${u.device ? ' · ' + esc(u.device) : ''}${u.topContent ? ' · ' + esc(u.topContent) : ''}</span>` : ''}
               </td>
@@ -5374,9 +5625,10 @@ function renderTopUsers(users) {
               <td data-label="Vues">${u.views || 0}</td>
               <td data-label="Sections">${u.sections || 0}${u.studyMin ? ` <span class="sub" style="margin-left:4px">(${u.studyMin} min)</span>` : ''}</td>
               <td data-label="Sessions">${u.sessions || 0}</td>
+              <td data-label="Dernier accès" style="font-size:11.5px;color:var(--text-dim)">${relDays(u.lastSeenDate, u.lastSeenAt)}</td>
               <td data-label="">
-                <button class="btn btn-secondary btn-sm" onclick="window.__openUser('${u.uid}')">
-                  <i class="fas fa-eye"></i>
+                <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();window.__openAnalyticsUser('${u.uid}')">
+                  <i class="fas fa-chart-line"></i>
                 </button>
               </td>
             </tr>
@@ -5386,6 +5638,291 @@ function renderTopUsers(users) {
     </div>
   `;
 }
+
+// ─── Export CSV du tableau analytics ─────────────────────────────────
+function exportAnalyticsCsv() {
+  const users = (state.analyticsData && (state.analyticsData.allUsers || state.analyticsData.topUsers)) || [];
+  if (!users.length) {
+    toast('Aucune donnée à exporter sur cette période', 'info');
+    return;
+  }
+  const q = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const rows = [['Nom', 'Email', 'Rôle', 'Temps (s)', 'Temps', 'Vues', 'Sessions', 'Sections', "Minutes d'étude", 'Dernier accès', 'Appareil', 'Matière préférée']];
+  users.forEach((u) => {
+    rows.push([
+      u.name || '', u.email || '', u.isOwner ? 'Propriétaire' : 'Élève',
+      u.totalTime || 0, formatDuration(u.totalTime || 0), u.views || 0, u.sessions || 0,
+      u.sections || 0, u.studyMin || 0,
+      u.lastSeenDate || '', u.device || '',
+      u.topSubjects && u.topSubjects[0] ? u.topSubjects[0].key : ''
+    ]);
+  });
+  const csv = '\uFEFF' + rows.map((r) => r.map(q).join(';')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const d = new Date().toISOString().slice(0, 10);
+  a.download = `arvexa-analytics-${d}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  toast(`${users.length} ligne(s) exportée(s)`, 'success');
+}
+
+// ─── Fiche analytique élève (modale) ─────────────────────────────────
+window.__openAnalyticsUser = function (uid) {
+  const all = (state.analyticsData && (state.analyticsData.allUsers || state.analyticsData.topUsers)) || [];
+  const u = all.find((x) => x.uid === uid);
+  if (!u) return;
+
+  const fav = (u.topSubjects && u.topSubjects[0]) || null;
+  const tops = (arr, labelFn) => (arr || []).slice(0, 6).map((x) => `
+    <div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+      <span style="color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(labelFn(x.key))}</span>
+      <strong style="color:var(--gold);flex-shrink:0">${x.count}</strong>
+    </div>`).join('') || '<div style="font-size:12px;color:var(--text-dim)">—</div>';
+
+  $('userModalContent').innerHTML = `
+    <div class="m-head">
+      <div class="m-avatar">${esc((u.name || 'U').slice(0, 1).toUpperCase())}</div>
+      <div style="min-width:0;flex:1">
+        <div class="m-name">${esc(u.name || 'Utilisateur')} ${u.isOwner ? '<span class="badge gold">Propriétaire</span>' : ''}</div>
+        <div class="m-email">${esc(u.email || '')}</div>
+      </div>
+    </div>
+
+    <div class="m-grid">
+      <div class="m-item"><div class="m-item-label">Temps total</div><div class="m-item-value" style="color:var(--gold)">${formatDuration(u.totalTime || 0)}</div></div>
+      <div class="m-item"><div class="m-item-label">Pages vues</div><div class="m-item-value">${u.views || 0}</div></div>
+      <div class="m-item"><div class="m-item-label">Sessions</div><div class="m-item-value">${u.sessions || 0}</div></div>
+      <div class="m-item"><div class="m-item-label">Sections étudiées</div><div class="m-item-value">${u.sections || 0}</div></div>
+      <div class="m-item"><div class="m-item-label">Minutes d'étude</div><div class="m-item-value">${u.studyMin || 0}</div></div>
+      <div class="m-item"><div class="m-item-label">Dernier accès</div><div class="m-item-value">${relDays(u.lastSeenDate, u.lastSeenAt)}</div></div>
+      <div class="m-item"><div class="m-item-label">Appareil</div><div class="m-item-value">${u.device === 'mobile' ? '📱 Mobile' : u.device === 'tablet' ? '📱 Tablette' : u.device === 'desktop' ? '💻 Ordinateur' : '—'}</div></div>
+      <div class="m-item"><div class="m-item-label">Matière préférée</div><div class="m-item-value">${fav ? esc(subjectLabel(fav.key)) : '—'}</div></div>
+    </div>
+
+    <div style="margin-top:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Activité des 14 derniers jours</div>
+      <div style="height:150px"><canvas id="analyticsUserActivity"></canvas></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Pages préférées</div>
+        ${tops(u.topPages, (k) => k)}
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Fonctions préférées</div>
+        ${tops(u.topFeatures, (k) => k)}
+      </div>
+    </div>
+
+    <div style="margin-top:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Matières consultées</div>
+      ${tops(u.topSubjects, subjectLabel)}
+    </div>
+  `;
+
+  $('userModal').classList.add('show');
+  document.body.style.overflow = 'hidden';
+
+  // Courbe 14 jours
+  requestAnimationFrame(() => {
+    try {
+      const cv = $('analyticsUserActivity');
+      if (!cv || !window.Chart) return;
+      const days = [];
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+        days.push(d);
+      }
+      const vals = days.map((d) => Math.round(((u.byDate || {})[d] || 0) / 60));
+      if (state.charts.userActivity) state.charts.userActivity.destroy();
+      state.charts.userActivity = new Chart(cv, {
+        type: 'bar',
+        data: {
+          labels: days.map((d) => d.slice(8) + '/' + d.slice(5, 7)),
+          datasets: [{
+            data: vals,
+            backgroundColor: 'rgba(224,184,74,0.75)',
+            borderRadius: 3
+          }]
+        },
+        options: {
+          ...chartOpts(),
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.parsed.y} min` } } },
+          scales: { x: { display: false }, y: { beginAtZero: true, ticks: { callback: (v) => v + 'm' } } }
+        }
+      });
+    } catch (e) { console.error('userActivity chart:', e); }
+  });
+};
+
+// ─── RÉTENTION ────────────────────────────────────────────────────────
+async function loadRetention() {
+  $('retentionStats').innerHTML = '<div class="loading" style="grid-column:1/-1"><div class="spinner"></div><span>Chargement...</span></div>';
+  try {
+    if (!state.customSelects.retentionFilter) {
+      state.customSelects.retentionFilter = new CustomSelect($('retentionFilter'), [
+        { value: 'all', label: 'Tous les profils', prefix: '🌍' },
+        { value: 'atRisk', label: 'À risque (31-60 j)', prefix: '⚠️' },
+        { value: 'lost', label: 'Perdus (>60 j)', prefix: '💤' },
+        { value: 'active1', label: "Actifs aujourd'hui", prefix: '🔥' },
+        { value: 'active7', label: 'Actifs cette semaine', prefix: '📆' },
+        { value: 'active30', label: 'Actifs ce mois', prefix: '🗓️' },
+        { value: 'neverSeen', label: 'Jamais vus', prefix: '👻' }
+      ]);
+      state.customSelects.retentionFilter.onChange = () => renderRetentionList();
+    }
+    const data = await callApi('getRetention');
+    state.retentionData = data;
+    state.retentionByUid = {};
+    (data.users || []).forEach((r) => { state.retentionByUid[r.uid] = r; });
+    renderRetention();
+  } catch (e) {
+    console.error('loadRetention:', e);
+    $('retentionStats').innerHTML = `<div class="error-state" style="grid-column:1/-1"><i class="fas fa-exclamation-triangle"></i> Impossible de charger la rétention : ${esc(e.message)}</div>`;
+  }
+}
+
+const RET_STATUS = {
+  active1:   { label: '🔥 Actif',           cls: 'green' },
+  active7:   { label: '📆 Cette semaine',   cls: 'green' },
+  active30:  { label: '🗓️ Ce mois',         cls: 'gold' },
+  atRisk:    { label: '⚠️ À risque',        cls: 'gold' },
+  lost:      { label: '💤 Perdu',           cls: 'red' },
+  neverSeen: { label: '👻 Jamais vu',       cls: 'gray' }
+};
+
+function renderRetention() {
+  const d = state.retentionData;
+  if (!d) return;
+  const b = d.buckets || {};
+
+  $('retentionStats').innerHTML = `
+    <div class="card">
+      <div class="card-label"><i class="fas fa-fire"></i> Actifs aujourd'hui</div>
+      <div class="card-value ${b.active1 > 0 ? 'gold' : ''}">${b.active1 || 0}</div>
+      <div class="card-sub">${b.active7 || 0} sur 7 jours</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-calendar-check"></i> Rétention 7 jours</div>
+      <div class="card-value">${d.retained7 || 0}%</div>
+      <div class="card-sub">des élèves reviennent à 7 j</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-calendar"></i> Rétention 30 jours</div>
+      <div class="card-value">${d.retained30 || 0}%</div>
+      <div class="card-sub">des élèves reviennent à 30 j</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-triangle-exclamation"></i> À risque (31-60 j)</div>
+      <div class="card-value ${b.atRisk > 0 ? 'gold' : ''}">${b.atRisk || 0}</div>
+      <div class="card-sub">à relancer par notification</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-moon"></i> Perdus (&gt;60 j)</div>
+      <div class="card-value ${b.lost > 0 ? 'red' : ''}">${b.lost || 0}</div>
+      <div class="card-sub">inactifs depuis plus de 2 mois</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><i class="fas fa-ghost"></i> Jamais vus</div>
+      <div class="card-value">${b.neverSeen || 0}</div>
+      <div class="card-sub">aucune activité enregistrée</div>
+    </div>
+  `;
+
+  renderRetentionList();
+}
+
+function renderRetentionList() {
+  const d = state.retentionData;
+  if (!d) return;
+  let rows = d.users || [];
+
+  const f = state.customSelects.retentionFilter?.getValue() || 'all';
+  if (f !== 'all') rows = rows.filter((r) => r.status === f);
+
+  const search = ($('retentionSearch').value || '').toLowerCase().trim();
+  if (search) {
+    rows = rows.filter((r) =>
+      (r.name || '').toLowerCase().includes(search) ||
+      (r.email || '').toLowerCase().includes(search));
+  }
+
+  $('retentionTableSub').textContent = `${rows.length} profil(s) — classés du plus inactif au plus récent`;
+
+  if (!rows.length) {
+    $('retentionList').innerHTML = '<div class="empty"><i class="fas fa-user-clock"></i><strong>Aucun profil</strong><span>Aucun résultat pour ces filtres.</span></div>';
+    return;
+  }
+
+  $('retentionList').innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Élève</th><th>Dernier accès</th><th>Inactivité</th><th>Statut</th><th>Temps cumulé</th><th>Vues</th><th>Matière préférée</th><th></th></tr>
+        </thead>
+        <tbody>
+          ${rows.slice(0, 100).map((r) => {
+            const st = RET_STATUS[r.status] || RET_STATUS.neverSeen;
+            return `
+            <tr>
+              <td data-label="Élève">
+                <strong>${esc(r.name || 'Utilisateur')}</strong>
+                ${r.isOwner ? '<span class="badge gold" style="margin-left:6px">Propriétaire</span>' : ''}
+                <span class="sub">${esc(r.email || '')}</span>
+              </td>
+              <td data-label="Dernier accès" style="font-size:12px">${r.lastSeenDate ? esc(r.lastSeenDate) : '—'}</td>
+              <td data-label="Inactivité" style="font-size:12px">${r.daysSince === null ? '—' : r.daysSince === 0 ? "aujourd'hui" : `${r.daysSince} j`}</td>
+              <td data-label="Statut"><span class="badge ${st.cls}">${st.label}</span></td>
+              <td data-label="Temps cumulé"><strong style="color:var(--gold)">${formatDuration(r.totalTime || 0)}</strong></td>
+              <td data-label="Vues">${r.views || 0}</td>
+              <td data-label="Matière préférée" style="font-size:12px">${r.favSubject ? esc(subjectLabel(r.favSubject)) : '—'}</td>
+              <td data-label="">
+                <button class="btn btn-secondary btn-sm" title="Envoyer une notification" onclick="switchView('notifications')">
+                  <i class="fas fa-paper-plane"></i>
+                </button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ─── v2.0 — FICHE RETENTION (modale légère) ──────────────────────────
+window.__openRetentionUser = function (uid) {
+  const r = (state.retentionData && state.retentionData.users || []).find((x) => x.uid === uid);
+  if (!r) return;
+  const st = RET_STATUS[r.status] || RET_STATUS.neverSeen;
+  $('userModalContent').innerHTML = `
+    <div class="m-head">
+      <div class="m-avatar">${esc((r.name || 'U').slice(0, 1).toUpperCase())}</div>
+      <div style="min-width:0;flex:1">
+        <div class="m-name">${esc(r.name || 'Utilisateur')} ${r.isOwner ? '<span class="badge gold">Propriétaire</span>' : ''}</div>
+        <div class="m-email">${esc(r.email || '')}</div>
+      </div>
+    </div>
+    <div class="m-grid">
+      <div class="m-item"><div class="m-item-label">Statut</div><div class="m-item-value"><span class="badge ${st.cls}">${st.label}</span></div></div>
+      <div class="m-item"><div class="m-item-label">Dernier accès</div><div class="m-item-value">${r.lastSeenDate ? esc(r.lastSeenDate) : '—'}</div></div>
+      <div class="m-item"><div class="m-item-label">Inactivité</div><div class="m-item-value">${r.daysSince === null ? '—' : r.daysSince + ' j'}</div></div>
+      <div class="m-item"><div class="m-item-label">Temps cumulé</div><div class="m-item-value" style="color:var(--gold)">${formatDuration(r.totalTime || 0)}</div></div>
+      <div class="m-item"><div class="m-item-label">Pages vues</div><div class="m-item-value">${r.views || 0}</div></div>
+      <div class="m-item"><div class="m-item-label">Sections étudiées</div><div class="m-item-value">${r.sections || 0}</div></div>
+      <div class="m-item"><div class="m-item-label">Matière préférée</div><div class="m-item-value">${r.favSubject ? esc(subjectLabel(r.favSubject)) : '—'}</div></div>
+      <div class="m-item"><div class="m-item-label">Appareil</div><div class="m-item-value">${r.device ? esc(r.device) : '—'}</div></div>
+    </div>
+    <div style="margin-top:12px;font-size:12.5px;color:var(--text-dim)">
+      💡 Pour la fiche d'activité détaillée (pages préférées, courbe 14 jours), ouvrez l'onglet <strong>Analytics</strong> avec la période « Tout le temps », puis touchez l'élève dans le top.
+    </div>
+  `;
+  $('userModal').classList.add('show');
+  document.body.style.overflow = 'hidden';
+};
     
 console.log('✅ ARVEXA Admin Console v6.0');
 </script>
