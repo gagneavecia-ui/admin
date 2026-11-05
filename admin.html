@@ -5486,6 +5486,11 @@ async function loadAnalyticsHealth() {
     const data = await callApi('getAnalyticsHealth');
     state.analyticsHealth = data.health || null;
     renderAnalyticsHealth();
+    // v2.0b — si le dashboard est visible, rafraîchir son sous-titre
+    // (la santé peut arriver APRÈS le premier rendu)
+    if (state.currentView === 'dashboard' && state.stats && state.stats.totalUsers !== undefined) {
+      try { loadDashboard(); } catch (e2) { console.error('dashSub refresh:', e2); }
+    }
   } catch (e) {
     console.error('loadAnalyticsHealth:', e);
     if (el) {
